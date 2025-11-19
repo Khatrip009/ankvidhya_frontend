@@ -1,0 +1,319 @@
+
+ ✅ **All Exported Functions / Components**
+
+ 🟦 **Core Button System**
+
+```
+BaseButton
+PrimaryBtn
+PrimaryAlt
+SecondaryBtn
+GlassBtn
+DangerBtn
+OutlineBtn
+```
+
+---
+
+ 🟩 **CRUD Buttons**
+
+```
+CreateBtn
+ViewBtn
+EditBtn
+DeleteBtn
+SaveBtn
+CancelBtn
+```
+
+---
+
+ 🟧 **Icon & Navigation Buttons**
+
+```
+IconBtn
+NavBtn
+```
+
+---
+
+ 🟪 **Toggles & Controls**
+
+```
+ToggleBtn
+SegmentedControl
+SplitButton
+```
+---
+
+ 🟨 **Special Buttons**
+
+```
+FAB                // Floating Action Button
+FileUploadBtn      // Styled file upload button
+```
+---
+
+ 🌗 **Theme System**
+
+```
+useTheme           // Hook for light/dark theme management
+ThemeToggleBtn     // Dark / Light switch button
+```
+
+ 🎯 You Can Now Import Like This:
+
+Example usage:
+
+```jsx
+import {
+  PrimaryBtn,
+  CreateBtn,
+  EditBtn,
+  DeleteBtn,
+  IconBtn,
+  ToggleBtn,
+  ThemeToggleBtn,
+} from "../components/buttons";
+```
+
+====================Table=========================================
+Here you go — **the complete list of all exported components, helpers, and utilities** from your `tables.jsx`.
+You can now pick and import only what you need into your **simple table.jsx** or anywhere in your ERP.
+
+---
+
+ ✅ **All Exported Functions / Components from tables.jsx**
+
+ 🟦 **Core Table Components**
+
+```
+SimpleTable
+DataTable
+ServerDataTable
+EditableTable
+VirtualizedTable
+TreeTable
+StickyHeaderTable
+```
+
+---
+
+ 🟩 **UI Helpers**
+
+```
+TableSkeleton
+EmptyState
+RowActions
+BulkActionsBar
+```
+
+---
+
+ 🟧 **Exporting Utilities**
+
+```
+ExportCSV        // Button component for CSV export
+```
+
+ Internal utility (not exported but used internally):
+
+```
+downloadCSV      // CSV generation helper
+```
+
+---
+
+ 🟪 **Default Export**
+
+```
+default export: TablesPlayground
+```
+
+(Not used in production, but useful for testing all variations.)
+
+---
+
+ ⭐ Ready-to-Use Import Examples
+
+ For a simple table page:
+
+```jsx
+import { SimpleTable } from "./tables";
+```
+
+ For data table with pagination & search:
+
+```jsx
+import { DataTable } from "./tables";
+```
+
+ For export button only:
+
+```jsx
+import { ExportCSV } from "./tables";
+```
+
+ For loading skeleton:
+
+```jsx
+import { TableSkeleton } from "./tables";
+```
+
+ For advanced ERP pages:
+
+```jsx
+import {
+  DataTable,
+  ServerDataTable,
+  EditableTable,
+  VirtualizedTable,
+  TreeTable,
+  StickyHeaderTable,
+  RowActions,
+  BulkActionsBar,
+  ExportCSV
+} from "./tables";
+```
+
+---------------------- INPUT ------------------------------------
+Here is the **complete and clean list of all exported components** from your `input-components.jsx`, ready to use anywhere in your ERP.
+
+---
+
+# ✅ **All Exported Components (Fully Usable)**
+
+## 🟦 **Form & Wrappers**
+
+### ✔ `FormField`
+
+Wrapper for label, help text, error text, and the input element.
+
+### ✔ `InputGroup`
+
+Prepend/append input styling (icons, text, units).
+
+---
+
+## 🟩 **Core Input Components**
+
+### ✔ `TextInput`
+
+Enhanced input with:
+
+* icons (left/right)
+* prefix/suffix
+* clearable
+* animations
+* sizes (`sm`, `md`, `lg`)
+* error states
+
+### ✔ `NumberInput`
+
+Styled numeric input with:
+
+* min/max
+* step
+* status states
+
+### ✔ `TextArea`
+
+Animated textarea with soft shadows.
+
+---
+
+## 🟧 **Select Components**
+
+### ✔ `Select`
+
+Beautiful native dropdown:
+
+* custom arrow
+* multiple select
+* size + status support
+
+### ✔ `SearchableSelect`
+
+Custom animated dropdown with:
+
+* real-time filtering
+* framer-motion transitions
+* no external library
+
+---
+
+## 🟪 **Choice Inputs**
+
+### ✔ `RadioGroup`
+
+Pill-style interactive radio buttons.
+
+### ✔ `Checkbox`
+
+Custom checkbox with checkmark icon.
+
+### ✔ `ToggleSwitch`
+
+Animated iOS-style toggle switch (with motion).
+
+---
+
+## 🟫 **Specialized Inputs**
+
+### ✔ `DateInput`
+
+Styled date picker based on native input.
+
+### ✔ `FileInput`
+
+Modern drag & drop file uploader:
+
+* dashed border
+* animation highlight on drag
+* browse button
+* supports multiple files
+
+---
+
+## 🟨 **Input Variants**
+
+### ✔ `IconInput`
+
+Shorthand for `TextInput` with an icon.
+
+### ✔ `ClearableInput`
+
+Shorthand for `TextInput` with `clearable`.
+
+---
+
+## 🟦 **Default Export**
+
+### ✔ `InputsPlayground`
+
+Demo page for testing all inputs.
+
+---
+
+# 📌 Summary List (copy-friendly)
+
+```
+FormField
+TextInput
+NumberInput
+TextArea
+Select
+SearchableSelect
+RadioGroup
+Checkbox
+ToggleSwitch
+DateInput
+FileInput
+IconInput
+ClearableInput
+InputGroup
+
+default export: InputsPlayground
+```
+
+---
