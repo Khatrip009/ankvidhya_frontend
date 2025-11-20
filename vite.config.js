@@ -2,12 +2,17 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
 export default defineConfig(({ mode }) => {
-  const isGhPages = process.env.DEPLOY_TARGET === 'gh-pages' || mode === 'production';
+  // Use explicit env override or production mode to enable gh-pages base.
+  // Set DEPLOY_TARGET=gh-pages when deploying, or rely on mode==='production'
+  const deployTarget = process.env.DEPLOY_TARGET || '';
+  const isGhPages = deployTarget === 'gh-pages' || mode === 'production';
+
   return {
     plugins: [react()],
-    base: isGhPages ? '/Ankvidhya_Frontend/' : '/',
+    // IMPORTANT: match your GitHub repo name EXACTLY and case-sensitively
+    base: isGhPages ? '/ankvidhya_frontend/' : '/',
     build: {
-      chunkSizeWarningLimit: 1500, // bump limit to silence warning (1.5MB)
+      chunkSizeWarningLimit: 1500, // 1.5 MB - you bumped this earlier
       rollupOptions: {
         output: {
           manualChunks(id) {
