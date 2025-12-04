@@ -323,7 +323,7 @@ function AppContainer() {
         <Route
           path="/dashboard/school"
           element={
-            <ProtectedRoute}>
+            <ProtectedRoute>
               <SchoolDashboard />
             </ProtectedRoute>
           }
