@@ -1,5 +1,5 @@
 /*
-  tables.jsx
+  table.jsx
   Comprehensive set of reusable Table components for Shreeja ERP
   - TailwindCSS assumed for styling
   - Framer Motion available for subtle animations
@@ -16,7 +16,7 @@
   - For virtualization in production prefer react-virtual or react-window; this simple implementation demonstrates the idea.
   - Keep components composable and small; customize column renderers via `columns` prop.
 */
-
+// src/components/table.jsx
 import React, { useMemo, useState, useEffect, useRef, useCallback, useContext } from 'react';
 import { motion } from 'framer-motion';
 // Use namespace import for file-saver to avoid build/ESM mismatch issues in some bundlers
@@ -630,3 +630,72 @@ export default function TablesPlayground() {
     </div>
   );
 }
+
+/* -------------------- Pagination Component -------------------- */
+export const Pagination = ({
+  currentPage = 1,
+  totalPages = 1,
+  onPageChange,
+  showNumbers = true,
+  className = "",
+}) => {
+  if (totalPages <= 1) return null;
+
+  const pages = [];
+
+  for (let i = 1; i <= totalPages; i++) {
+    pages.push(i);
+  }
+
+  return (
+    <div className={`flex items-center gap-1 ${className}`}>
+      <button
+        className="px-3 py-1 rounded-md border bg-white disabled:opacity-50"
+        disabled={currentPage === 1}
+        onClick={() => onPageChange(1)}
+      >
+        «
+      </button>
+
+      <button
+        className="px-3 py-1 rounded-md border bg-white disabled:opacity-50"
+        disabled={currentPage === 1}
+        onClick={() => onPageChange(currentPage - 1)}
+      >
+        ‹
+      </button>
+
+      {showNumbers &&
+        pages.map((p) => (
+          <button
+            key={p}
+            onClick={() => onPageChange(p)}
+            className={`px-3 py-1 rounded-md border
+              ${
+                p === currentPage
+                  ? "bg-cyan-600 text-white border-cyan-600"
+                  : "bg-white hover:bg-slate-100"
+              }`}
+          >
+            {p}
+          </button>
+        ))}
+
+      <button
+        className="px-3 py-1 rounded-md border bg-white disabled:opacity-50"
+        disabled={currentPage === totalPages}
+        onClick={() => onPageChange(currentPage + 1)}
+      >
+        ›
+      </button>
+
+      <button
+        className="px-3 py-1 rounded-md border bg-white disabled:opacity-50"
+        disabled={currentPage === totalPages}
+        onClick={() => onPageChange(totalPages)}
+      >
+        »
+      </button>
+    </div>
+  );
+};

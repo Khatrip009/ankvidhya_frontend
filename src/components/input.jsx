@@ -391,3 +391,61 @@ export default function InputsPlayground() {
     </div>
   );
 }
+/* -------------------- SearchInput -------------------- */
+export const SearchInput = React.forwardRef(
+  (
+    {
+      value,
+      defaultValue,
+      onChange,
+      placeholder = "Search...",
+      className = "",
+      size = "md",
+      disabled = false,
+      autoFocus = false,
+      ...props
+    },
+    ref
+  ) => {
+    return (
+      <TextInput
+        ref={ref}
+        type="search"
+        value={value}
+        defaultValue={defaultValue}
+        onChange={onChange}
+        placeholder={placeholder}
+        size={size}
+        disabled={disabled}
+        autoFocus={autoFocus}
+        className={className}
+        prefix={
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            className="text-slate-400"
+          >
+            <circle
+              cx="11"
+              cy="11"
+              r="7"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              fill="none"
+            />
+            <path
+              d="M21 21l-4.35-4.35"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+            />
+          </svg>
+        }
+        clearable
+        {...props}
+      />
+    );
+  }
+);
+

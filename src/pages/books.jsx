@@ -1,30 +1,50 @@
 // src/pages/books.jsx
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import api from "../lib/api";
 import ERPIcons from "../components/icons.jsx";
-import { FormField, TextInput, Select, FileInput } from "../components/input.jsx";
-import { SimpleTable, ExportCSV } from "../components/table.jsx";
+import { FormField, TextInput, Select, FileInput, SearchInput } from "../components/input.jsx";
+import { SimpleTable, ExportCSV, Pagination } from "../components/table.jsx";
+import { PrimaryBtn, SecondaryBtn, DangerBtn, OutlineBtn, IconBtn } from "../components/buttons.jsx";
+import { Card, CardHeader, CardBody, CardFooter, LoadingCard } from "../components/cards.jsx";
+import { useToast } from "../hooks/useToast.jsx";
+import { useDebounce } from "../hooks/useDebounce.jsx";
 
 const defaultImg = "/images/placeholder.png";
 const headerLogo = "/images/Ank_Logo.png";
 
 const imgOrDefault = (url) => (url && String(url).trim()) ? url : defaultImg;
 
+// Constants
+const DEFAULT_PAGE_SIZE = 20;
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
+
 export default function BooksPage() {
+  const toast = useToast();
+  
+  // Data states
   const [courses, setCourses] = useState([]);
   const [mediums, setMediums] = useState([]);
   const [standards, setStandards] = useState([]);
-
+  
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [pagination, setPagination] = useState({ page: 1, pageSize: 20, total: 0 });
-
-  const [q, setQ] = useState("");
-  const [fCourse, setFCourse] = useState("");
-  const [fMedium, setFMedium] = useState("");
-  const [fStd, setFStd] = useState("");
-
-  // modal & form
+  const [pagination, setPagination] = useState({ 
+    page: 1, 
+    pageSize: DEFAULT_PAGE_SIZE, 
+    total: 0,
+    totalPages: 0
+  });
+  
+  // Filter states
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filters, setFilters] = useState({
+    course_id: "",
+    medium_id: "",
+    std_id: ""
+  });
+  
+  // Modal & form states
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({
@@ -37,73 +57,130 @@ export default function BooksPage() {
     std_id: "",
     image: ""
   });
-
-  // upload
+  const [formErrors, setFormErrors] = useState({});
+  
+  // File upload states
   const fileRef = useRef(null);
   const [filePreview, setFilePreview] = useState(defaultImg);
   const [uploading, setUploading] = useState(false);
-
+  const [uploadProgress, setUploadProgress] = useState(0);
+  
+  // Bulk operations
+  const [selectedRows, setSelectedRows] = useState([]);
+  const [bulkAction, setBulkAction] = useState("");
+  
+  // Search debouncing
+  const debouncedSearch = useDebounce(searchQuery, 300);
+  
+  // Fetch lookup data
   useEffect(() => {
-    (async () => {
-      try {
-        const [cRes, mRes, sRes] = await Promise.all([
-          api.get("/api/courses", { query: { pageSize: 1000 } }),
-          api.get("/api/master", { query: { table: "media", pageSize: 1000 } }),
-          api.get("/api/master", { query: { table: "standards", pageSize: 1000 } })
-        ]);
-        setCourses(cRes?.data || []);
-        setMediums(mRes?.data || []);
-        setStandards(sRes?.data || []);
-      } catch (err) {
-        console.error("lookup load", err);
-        window.ui?.toast?.("Failed to load lookups", "warning");
-      }
-    })();
+    fetchLookupData();
   }, []);
-
+  
+  // Fetch books when filters or pagination change
   useEffect(() => {
-    fetchRows();
+    fetchBooks();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pagination.page, pagination.pageSize, fCourse, fMedium, fStd]);
-
-  async function fetchRows() {
+  }, [pagination.page, pagination.pageSize, filters, debouncedSearch]);
+  
+  const fetchLookupData = async () => {
+    try {
+      const [cRes, mRes, sRes] = await Promise.all([
+        api.get("/api/courses", { query: { pageSize: 1000 } }),
+        api.get("/api/master", { query: { table: "media", pageSize: 1000 } }),
+        api.get("/api/master", { query: { table: "standards", pageSize: 1000 } })
+      ]);
+      setCourses(cRes?.data || []);
+      setMediums(mRes?.data || []);
+      setStandards(sRes?.data || []);
+    } catch (err) {
+      console.error("Failed to load lookup data:", err);
+      toast.error("Failed to load dropdown options");
+    }
+  };
+  
+  const fetchBooks = async () => {
     setLoading(true);
     try {
-      const qobj = {
+      const query = {
         page: pagination.page,
         pageSize: pagination.pageSize,
+        ...filters
       };
-      if (q) qobj.search = q;
-      if (fCourse) qobj.course_id = fCourse;
-      if (fMedium) qobj.medium_id = fMedium;
-      if (fStd) qobj.std_id = fStd;
-
-      const res = await api.get("/api/books", { query: qobj });
+      
+      if (debouncedSearch) {
+        query.search = debouncedSearch;
+      }
+      
+      const res = await api.get("/api/books", { query });
       const data = res?.data || [];
-      const pg = res?.pagination || { page: pagination.page, pageSize: pagination.pageSize, total: data.length };
+      const pg = res?.pagination || { 
+        page: pagination.page, 
+        pageSize: pagination.pageSize, 
+        total: data.length,
+        totalPages: Math.ceil(data.length / pagination.pageSize)
+      };
+      
       setRows(data);
-      setPagination({ page: pg.page, pageSize: pg.pageSize, total: pg.total });
+      setPagination(prev => ({
+        ...prev,
+        ...pg,
+        totalPages: pg.totalPages || Math.ceil(pg.total / pg.pageSize)
+      }));
+      
+      // Clear selection if data changes significantly
+      if (selectedRows.length > 0) {
+        setSelectedRows([]);
+      }
+      
     } catch (err) {
-      console.error("fetch books", err);
-      window.ui?.toast?.("Failed to load books", "danger");
+      console.error("Failed to fetch books:", err);
+      toast.error("Failed to load books. Please try again.");
       setRows([]);
-      setPagination(p => ({ ...p, total: 0 }));
+      setPagination(prev => ({ ...prev, total: 0, totalPages: 0 }));
     } finally {
       setLoading(false);
     }
-  }
-
-  function openNew() {
+  };
+  
+  const validateForm = () => {
+    const errors = {};
+    
+    if (!form.book_name.trim()) {
+      errors.book_name = "Book name is required";
+    }
+    
+    if (form.price && isNaN(Number(form.price))) {
+      errors.price = "Price must be a valid number";
+    }
+    
+    if (form.price && Number(form.price) < 0) {
+      errors.price = "Price cannot be negative";
+    }
+    
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+  
+  const handleCreate = () => {
     setEditing(null);
     setForm({
-      book_id: null, book_name: "", description: "", price: "", course_id: "", medium_id: "", std_id: "", image: ""
+      book_id: null,
+      book_name: "",
+      description: "",
+      price: "",
+      course_id: "",
+      medium_id: "",
+      std_id: "",
+      image: ""
     });
+    setFormErrors({});
     fileRef.current = null;
     setFilePreview(defaultImg);
     setModalOpen(true);
-  }
-
-  function openEdit(row) {
+  };
+  
+  const handleEdit = useCallback((row) => {
     setEditing(row);
     setForm({
       book_id: row.book_id || null,
@@ -115,401 +192,984 @@ export default function BooksPage() {
       std_id: row.std_id ?? "",
       image: row.image || ""
     });
+    setFormErrors({});
     fileRef.current = null;
     setFilePreview(imgOrDefault(row.image));
     setModalOpen(true);
-  }
-
-  async function deleteRow(row) {
-    if (!confirm("Delete this book?")) return;
+  }, []);
+  
+  const handleDelete = async (row) => {
+    if (!window.confirm(`Are you sure you want to delete "${row.book_name}"?`)) {
+      return;
+    }
+    
     try {
       await api.delete(`/api/books/${row.book_id}`);
-      window.ui?.toast?.("Book deleted", "success");
-      fetchRows();
+      toast.success("Book deleted successfully");
+      
+      // Refresh data
+      fetchBooks();
+      
+      // Track analytics
+      trackEvent('book_deleted', { bookId: row.book_id });
     } catch (err) {
-      console.error("delete book", err);
-      window.ui?.toast?.("Delete failed", "danger");
+      console.error("Delete failed:", err);
+      toast.error("Failed to delete book. Please try again.");
     }
-  }
-
-  async function uploadFile(file) {
+  };
+  
+  const handleBulkDelete = async () => {
+    if (selectedRows.length === 0 || !window.confirm(`Delete ${selectedRows.length} selected books?`)) {
+      return;
+    }
+    
+    try {
+      await Promise.all(
+        selectedRows.map(id => api.delete(`/api/books/${id}`))
+      );
+      
+      toast.success(`Deleted ${selectedRows.length} books successfully`);
+      setSelectedRows([]);
+      fetchBooks();
+      
+      trackEvent('bulk_books_deleted', { count: selectedRows.length });
+    } catch (err) {
+      console.error("Bulk delete failed:", err);
+      toast.error("Failed to delete some books. Please try again.");
+    }
+  };
+  
+  const handleBulkExport = () => {
+    const selectedBooks = rows.filter(row => selectedRows.includes(row.book_id));
+    const csvData = selectedBooks.map(book => ({
+      'Book Name': book.book_name,
+      'Description': book.description || '',
+      'Price': book.price ? `₹${book.price}` : '',
+      'Course': book.course_name || '',
+      'Medium': book.medium_name || '',
+      'Standard': book.std_name || '',
+      'Image URL': book.image || ''
+    }));
+    
+    // Use ExportCSV logic or custom export
+    exportToCSV(csvData, `selected_books_${new Date().toISOString().slice(0, 10)}.csv`);
+    trackEvent('bulk_books_exported', { count: selectedBooks.length });
+  };
+  
+  const exportToCSV = (data, filename) => {
+    if (!data || data.length === 0) return;
+    
+    const headers = Object.keys(data[0]);
+    const csvContent = [
+      headers.join(','),
+      ...data.map(row => 
+        headers.map(header => {
+          const cell = row[header];
+          return typeof cell === 'string' && cell.includes(',') 
+            ? `"${cell}"` 
+            : cell;
+        }).join(',')
+      )
+    ].join('\n');
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  };
+  
+  const uploadFile = async (file) => {
     if (!file) return null;
+    
     setUploading(true);
+    setUploadProgress(0);
+    
     try {
       const fd = new FormData();
       fd.append("file", file);
-      // Try generic uploads endpoint first, fallback to course/book upload
+      
+      // Simulate progress (in real app, use axios progress event)
+      const progressInterval = setInterval(() => {
+        setUploadProgress(prev => Math.min(prev + 10, 90));
+      }, 100);
+      
+      let uploadedUrl = null;
+      
       try {
-        const r = await api.post("/api/uploads", fd, { headers: { "Content-Type": "multipart/form-data" } });
-        return r?.data?.url ?? r?.data?.fileUrl ?? null;
+        // Try multiple upload endpoints
+        const r = await api.post("/api/uploads", fd, {
+          headers: { "Content-Type": "multipart/form-data" },
+          onUploadProgress: (progressEvent) => {
+            const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            setUploadProgress(percent);
+          }
+        });
+        uploadedUrl = r?.data?.url || r?.data?.fileUrl || null;
       } catch (e) {
         try {
-          const r2 = await api.post("/api/books/upload-image", fd, { headers: { "Content-Type": "multipart/form-data" } });
-          return r2?.data?.url ?? r2?.data?.fileUrl ?? null;
+          const r2 = await api.post("/api/books/upload-image", fd, {
+            headers: { "Content-Type": "multipart/form-data" }
+          });
+          uploadedUrl = r2?.data?.url || r2?.data?.fileUrl || null;
         } catch (ee) {
-          console.warn("upload endpoints failed, will embed data URL", ee);
+          console.warn("Upload endpoints failed, converting to data URL", ee);
+          // Fallback to data URL
+          uploadedUrl = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+          });
         }
+      } finally {
+        clearInterval(progressInterval);
+        setUploadProgress(100);
       }
-      // last-resort convert to data URL for immediate preview/save
-      return await new Promise((res, rej) => {
-        const reader = new FileReader();
-        reader.onload = () => res(reader.result);
-        reader.onerror = rej;
-        reader.readAsDataURL(file);
-      });
+      
+      return uploadedUrl;
+    } catch (err) {
+      console.error("Upload failed:", err);
+      toast.error("Failed to upload image. Please try again.");
+      return null;
     } finally {
       setUploading(false);
+      setTimeout(() => setUploadProgress(0), 1000);
     }
-  }
-
-  function onFileSelected(files) {
+  };
+  
+  const handleFileSelect = (files) => {
     if (!files || !files.length) return;
-    const f = files[0];
-    fileRef.current = f;
-    try {
-      const blobUrl = URL.createObjectURL(f);
-      setFilePreview(blobUrl);
-    } catch (err) {
-      // fallback: no preview URL
-      console.warn("file preview error", err);
-      setFilePreview(defaultImg);
-    }
-  }
-
-  function onImageUrlChange(v) {
-    setForm(fr => ({ ...fr, image: v }));
-    setFilePreview(imgOrDefault(v));
-    fileRef.current = null;
-  }
-
-  async function handleSave(e) {
-    e && e.preventDefault && e.preventDefault();
-    if (!form.book_name || !String(form.book_name).trim()) {
-      window.ui?.toast?.("Book name required", "danger");
+    
+    const file = files[0];
+    
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("File size must be less than 5MB");
       return;
     }
-
+    
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      toast.error("Please select an image file");
+      return;
+    }
+    
+    fileRef.current = file;
+    
+    // Create preview
     try {
-      let imageUrl = form.image ? String(form.image).trim() : null;
+      const blobUrl = URL.createObjectURL(file);
+      setFilePreview(blobUrl);
+    } catch (err) {
+      console.warn("Failed to create preview:", err);
+      setFilePreview(defaultImg);
+    }
+  };
+  
+  const handleSave = async (e) => {
+    e.preventDefault();
+    
+    if (!validateForm()) {
+      toast.error("Please fix the errors in the form");
+      return;
+    }
+    
+    try {
+      let imageUrl = form.image?.trim() || null;
+      
+      // Upload file if selected
       if (fileRef.current) {
-        const uploaded = await uploadFile(fileRef.current);
-        if (uploaded) imageUrl = uploaded;
+        const uploadedUrl = await uploadFile(fileRef.current);
+        if (uploadedUrl) {
+          imageUrl = uploadedUrl;
+        }
       }
-
+      
       const payload = {
-        book_name: String(form.book_name).trim(),
-        description: form.description ? String(form.description).trim() : null,
+        book_name: form.book_name.trim(),
+        description: form.description?.trim() || null,
         price: form.price ? Number(form.price) : null,
-        image: imageUrl || null,
+        image: imageUrl,
         course_id: form.course_id ? Number(form.course_id) : null,
         medium_id: form.medium_id ? Number(form.medium_id) : null,
         std_id: form.std_id ? Number(form.std_id) : null
       };
-
-      if (editing && editing.book_id) {
+      
+      if (editing?.book_id) {
         await api.put(`/api/books/${editing.book_id}`, payload);
-        window.ui?.toast?.("Book updated", "success");
+        toast.success("Book updated successfully");
+        trackEvent('book_updated', { bookId: editing.book_id });
       } else {
-        await api.post("/api/books", payload);
-        window.ui?.toast?.("Book created", "success");
+        const res = await api.post("/api/books", payload);
+        toast.success("Book created successfully");
+        trackEvent('book_created', { bookId: res?.data?.book_id });
       }
-
-      setModalOpen(false);
-      setEditing(null);
-      // cleanup blob URL if used
-      if (filePreview && filePreview.startsWith("blob:")) {
-        try { URL.revokeObjectURL(filePreview); } catch (err) {}
-      }
-      fileRef.current = null;
-      fetchRows();
+      
+      // Cleanup
+      handleModalClose();
+      fetchBooks();
+      
     } catch (err) {
-      console.error("save book", err);
-      window.ui?.toast?.(err?.message || "Save failed", "danger");
+      console.error("Save failed:", err);
+      toast.error(err?.response?.data?.message || "Failed to save book. Please try again.");
     }
-  }
-
-  const columns = [
-    { Header: "Name", accessor: "book_name" },
-    { Header: "Course", accessor: (r) => r.course_name || "—" },
-    { Header: "Medium", accessor: (r) => r.medium_name || "—" },
-    { Header: "Standard", accessor: (r) => r.std_name || "—" },
-    { Header: "Price", accessor: (r) => (r.price ? `₹ ${r.price}` : "—") },
-    { Header: "Image", accessor: (r) => <img src={imgOrDefault(r.image)} alt={r.book_name} style={{ height: 48, borderRadius: 6 }} /> },
+  };
+  
+  const handleModalClose = () => {
+    setModalOpen(false);
+    setEditing(null);
+    
+    // Cleanup blob URL
+    if (filePreview && filePreview.startsWith("blob:")) {
+      try {
+        URL.revokeObjectURL(filePreview);
+      } catch (err) {
+        console.warn("Failed to revoke blob URL:", err);
+      }
+    }
+    
+    fileRef.current = null;
+  };
+  
+  const handleRowSelect = (bookId) => {
+    setSelectedRows(prev => 
+      prev.includes(bookId)
+        ? prev.filter(id => id !== bookId)
+        : [...prev, bookId]
+    );
+  };
+  
+  const handleSelectAll = () => {
+    if (selectedRows.length === rows.length) {
+      setSelectedRows([]);
+    } else {
+      setSelectedRows(rows.map(row => row.book_id));
+    }
+  };
+  
+  const trackEvent = (eventName, properties = {}) => {
+    if (window.analytics) {
+      window.analytics.track(eventName, {
+        ...properties,
+        timestamp: new Date().toISOString()
+      });
+    }
+  };
+  
+  const handlePageChange = (page) => {
+    setPagination(prev => ({ ...prev, page }));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+  
+  const handleFilterChange = (key, value) => {
+    setFilters(prev => ({ ...prev, [key]: value }));
+    setPagination(prev => ({ ...prev, page: 1 }));
+  };
+  
+  const handleResetFilters = () => {
+    setSearchQuery("");
+    setFilters({
+      course_id: "",
+      medium_id: "",
+      std_id: ""
+    });
+    setPagination(prev => ({ ...prev, page: 1 }));
+  };
+  
+  // Memoized values
+  const courseOptions = useMemo(() => 
+    [{ value: "", label: "All Courses" }].concat(
+      courses.map(c => ({ value: c.course_id, label: c.course_name }))
+    ),
+    [courses]
+  );
+  
+  const mediumOptions = useMemo(() => 
+    [{ value: "", label: "All Mediums" }].concat(
+      mediums.map(m => ({ value: m.medium_id, label: m.medium_name }))
+    ),
+    [mediums]
+  );
+  
+  const standardOptions = useMemo(() => 
+    [{ value: "", label: "All Standards" }].concat(
+      standards.map(s => ({ value: s.std_id, label: s.std_name }))
+    ),
+    [standards]
+  );
+  
+  const tableColumns = useMemo(() => [
     {
-      Header: "Actions", accessor: (r) => (
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button onClick={() => openEdit(r)} className="btn" title="Edit"><ERPIcons.Edit style={{ width: 16, height: 16 }} /></button>
-          <button onClick={() => deleteRow(r)} className="btn" title="Delete"><ERPIcons.Delete style={{ width: 16, height: 16 }} /></button>
+      Header: (
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={rows.length > 0 && selectedRows.length === rows.length}
+            onChange={handleSelectAll}
+            className="rounded border-slate-300"
+          />
+          <span>Select</span>
+        </div>
+      ),
+      accessor: (r) => (
+        <input
+          type="checkbox"
+          checked={selectedRows.includes(r.book_id)}
+          onChange={() => handleRowSelect(r.book_id)}
+          className="rounded border-slate-300"
+        />
+      ),
+      width: 60
+    },
+    { 
+      Header: "Book Name", 
+      accessor: "book_name",
+      Cell: ({ value }) => (
+        <div className="font-medium text-slate-800">{value}</div>
+      )
+    },
+    { 
+      Header: "Course", 
+      accessor: (r) => r.course_name || "—",
+      Cell: ({ value }) => (
+        <span className="text-slate-600">{value}</span>
+      )
+    },
+    { 
+      Header: "Medium", 
+      accessor: (r) => r.medium_name || "—" 
+    },
+    { 
+      Header: "Standard", 
+      accessor: (r) => r.std_name || "—" 
+    },
+    { 
+      Header: "Price", 
+      accessor: (r) => r.price ? `₹${parseFloat(r.price).toFixed(2)}` : "—",
+      Cell: ({ value }) => (
+        <span className="font-medium text-emerald-700">{value}</span>
+      )
+    },
+    {
+      Header: "Image",
+      accessor: (r) => (
+        <div className="relative group">
+          <img 
+            src={imgOrDefault(r.image)} 
+            alt={r.book_name}
+            className="h-10 w-10 rounded-lg object-cover border border-slate-200"
+            loading="lazy"
+          />
+          {r.image && (
+            <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center">
+              <IconBtn
+  icon={ERPIcons.Search}
+  size="sm"
+  className="bg-white/20 text-white"
+  onClick={() => window.open(r.image, "_blank")}
+/>
+            </div>
+          )}
+        </div>
+      )
+    },
+    {
+      Header: "Actions",
+      accessor: (r) => (
+        <div className="flex items-center gap-2">
+          <IconBtn
+            icon={ERPIcons.Edit}
+            label="Edit"
+            size="sm"
+            onClick={() => handleEdit(r)}
+            className="hover:bg-slate-100"
+          />
+          <IconBtn
+            icon={ERPIcons.Delete}
+            label="Delete"
+            size="sm"
+            onClick={() => handleDelete(r)}
+            className="hover:bg-rose-50 hover:text-rose-600"
+          />
+          <IconBtn
+  icon={ERPIcons.Eye}
+  label="View"
+  size="sm"
+  onClick={() => window.open(`/books/${r.book_id}`, "_blank")}
+/>
+
         </div>
       )
     }
-  ];
-
-  const mkOpts = (list, idKey, labelKey) => [{ value: "", label: "— any —" }].concat((list || []).map(x => ({ value: x[idKey], label: x[labelKey] })));
-
-  return (
-    <main className="p-6 max-w-6xl mx-auto" style={{ fontFamily: "'Poppins', system-ui, -apple-system, 'Segoe UI', Roboto", fontSize: 16 }}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap');
-
-        :root{
-          --sidebar-bg: #f3f7ff;
-          --card-bg: #ffffff;
-          --muted: #56607a;
-          --accent-2: #0B6EFF;
-          --accent: #0ea5a3;
-          --radius:12px;
-        }
-
-        /* Page layout matching sidebar professional look */
-        .page-card { background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(250,252,255,0.98)); border-radius: 14px; padding: 18px; box-shadow: 0 14px 40px rgba(11,34,80,0.04); border: 1px solid rgba(11,34,80,0.04); }
-        h2 { font-size: 20px; margin: 0; font-weight: 700; color:#0f172a; }
-        .controls { display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; }
-        .control { min-width:160px; flex: 1 1 200px; }
-        .btn { padding:10px 12px; border-radius:10px; border:1px solid rgba(11,34,80,0.06); background:white; cursor:pointer; font-weight:600; font-size:15px; }
-        .btn-primary { background: linear-gradient(90deg, #06b6d4, var(--accent)); color:white; border:none; box-shadow: 0 10px 28px rgba(11,110,255,0.08); }
-        .small-muted { color: var(--muted); font-size:13px; }
-
-        .modal-plate { width: 920px; max-width: 96%; border-radius: 12px; overflow: hidden; box-shadow: 0 20px 60px rgba(11,34,80,0.14); }
-        .modal-header-bar { display:flex; align-items:center; gap:12px; padding:18px 20px; background: linear-gradient(90deg, #fbfdff, #ffffff); }
-        .modal-header-bar img { height:44px; width:auto; display:block; border-radius:8px; }
-        .modal-title { flex:1; text-align:center; font-size:18px; font-weight:700; color:#0f172a; }
-        .modal-body-grid { display:grid; grid-template-columns: 1fr 360px; gap:18px; padding:18px; background: #fff; }
-        .preview-card { border-radius:10px; padding:12px; border:1px solid rgba(11,34,80,0.06); background: linear-gradient(180deg,#ffffff,#fbfdff); display:flex; gap:12px; align-items:center; }
-        .modal-footer-bar { display:flex; gap:12px; justify-content:flex-end; padding:14px 18px; background:#fcfeff; border-top: 1px solid rgba(11,34,80,0.03); }
-
-        /* light sidebar-like background and subtle doodles to visually match sidebar */
-        .page-shell { background: linear-gradient(180deg, #f6f9ff 0%, #ffffff 60%); padding: 10px; border-radius: 16px; position: relative; overflow: visible; }
-
-        .doodle-left { position:absolute; left:-40px; top:-40px; width:160px; height:160px; opacity:0.9; pointer-events:none; transform-origin:center; animation: floatL 8s ease-in-out infinite; }
-        .doodle-right { position:absolute; right:-40px; bottom:-40px; width:140px; height:140px; opacity:0.9; pointer-events:none; transform-origin:center; animation: floatR 9s ease-in-out infinite; }
-        @keyframes floatL { 0%{ transform: translateY(0) rotate(-2deg); } 50%{ transform: translateY(6px) rotate(2deg); } 100%{ transform: translateY(0) rotate(-2deg); } }
-        @keyframes floatR { 0%{ transform: translateY(0) rotate(2deg); } 50%{ transform: translateY(-6px) rotate(-2deg); } 100%{ transform: translateY(0) rotate(2deg); } }
-
-        /* responsive */
-        @media (max-width: 980px) {
-          .modal-body-grid { grid-template-columns: 1fr; }
-          .preview-card img { display:block; margin: 0 auto; }
-        }
-      `}</style>
-
-      {/* decorative doodles (matching sidebar visual language) */}
-      <svg className="doodle-left" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" aria-hidden>
-        <defs><linearGradient id="g1" x1="0" x2="1"><stop offset="0" stopColor="#E6F6FF"/><stop offset="1" stopColor="#F0EBFF"/></linearGradient></defs>
-        <path fill="url(#g1)" d="M43.1,-45.9C56.4,-32.6,67.1,-18.1,67.1,-2.1C67.1,13.9,56.4,29.9,43.1,42.5C29.9,55.1,14.9,64.3,-0.1,64.4C-15.1,64.5,-30.1,55.5,-42.1,43.5C-54,31.5,-63,16.5,-64.5,-0.3C-66,-17.1,-60,-34.3,-47.6,-47.6C-35.2,-60.9,-17.6,-70.3,-0.1,-70.2C17.3,-70.1,34.6,-60.9,43.1,-45.9Z" transform="translate(100 100)" />
-      </svg>
-      <svg className="doodle-right" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" aria-hidden>
-        <defs><linearGradient id="g2" x1="0" x2="1"><stop offset="0" stopColor="#FFFBE6"/><stop offset="1" stopColor="#E8FFF6"/></linearGradient></defs>
-        <path fill="url(#g2)" d="M38.5,-40.3C50.2,-31,60.4,-21.6,64.8,-9.6C69.2,2.4,67.8,17.9,59.8,28.5C51.8,39.1,37.2,44.9,22.4,51.1C7.6,57.3,-8.4,63.8,-22.2,60.6C-36.1,57.4,-47.8,44.5,-57.2,30.6C-66.5,16.6,-73.6,1.6,-70.6,-11.1C-67.7,-23.8,-54.6,-34.2,-40.4,-43C-26.3,-51.7,-13.1,-58.9,-0.3,-58.6C12.6,-58.2,25.2,-50.3,38.5,-40.3Z" transform="translate(100 100)" />
-      </svg>
-
-      <div className="page-shell">
-        <div className="page-card" style={{ marginBottom: 14 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-            <div>
-              <h2>Books</h2>
-              <div style={{ color: "var(--muted)", marginTop: 6 }}>Manage books — link to courses, mediums and standards, upload images.</div>
-            </div>
-
-            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-              <button className="btn" onClick={() => { setPagination(p => ({ ...p, page: 1 })); fetchRows(); }} title="Reload">Reload</button>
-              <ExportCSV columns={columns} rows={rows} filename={`books_export_${new Date().toISOString().slice(0,10)}.csv`} />
-              <button className="btn btn-primary" onClick={openNew} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <ERPIcons.Plus style={{ width: 16, height: 16 }} /> New Book
-              </button>
-            </div>
+  ], [rows, selectedRows, handleEdit, handleDelete]);
+  
+  // Show loading skeleton
+  if (loading && rows.length === 0) {
+    return (
+      <div className="p-6 max-w-7xl mx-auto">
+        <div className="animate-pulse space-y-6">
+          <div className="h-8 bg-slate-200 rounded w-64"></div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {[...Array(4)].map((_, i) => (
+              <LoadingCard key={i} variant="detailed" lines={2} />
+            ))}
           </div>
-
-          <div style={{ marginTop: 14 }} className="controls">
-            <div className="control">
-              <FormField label="Search">
-                <TextInput placeholder="Search book name..." value={q} onChange={(v) => { setQ(v); setPagination(p => ({ ...p, page: 1 })); }} />
-              </FormField>
-            </div>
-
-            <div className="control" style={{ maxWidth: 240 }}>
-              <FormField label="Course">
-                <Select value={fCourse} onChange={(v) => { setFCourse(v); setPagination(p => ({ ...p, page: 1 })); }} options={mkOpts(courses, "course_id", "course_name")} />
-              </FormField>
-            </div>
-
-            <div className="control" style={{ maxWidth: 240 }}>
-              <FormField label="Medium">
-                <Select value={fMedium} onChange={(v) => { setFMedium(v); setPagination(p => ({ ...p, page: 1 })); }} options={mkOpts(mediums, "medium_id", "medium_name")} />
-              </FormField>
-            </div>
-
-            <div className="control" style={{ maxWidth: 240 }}>
-              <FormField label="Standard">
-                <Select value={fStd} onChange={(v) => { setFStd(v); setPagination(p => ({ ...p, page: 1 })); }} options={mkOpts(standards, "std_id", "std_name")} />
-              </FormField>
-            </div>
-
-            <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "flex-end" }}>
-              <FormField label="Rows">
-                <select className="form-control" value={pagination.pageSize} onChange={(e) => setPagination(p => ({ ...p, pageSize: Number(e.target.value), page: 1 }))}>
-                  {[10, 20, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
-                </select>
-              </FormField>
-            </div>
-          </div>
-        </div>
-
-        <div className="page-card">
-          <div style={{ marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div style={{ color: "var(--muted)" }}>
-              {rows.length ? `${(pagination.page-1)*pagination.pageSize + 1}–${Math.min(pagination.page * pagination.pageSize, pagination.total)} of ${pagination.total}` : "No books"}
-            </div>
-
-            <div style={{ display: "flex", gap: 8 }}>
-              <button className="btn" disabled={pagination.page <= 1} onClick={() => setPagination(p => ({ ...p, page: Math.max(1, p.page - 1) }))}>Prev</button>
-              <button className="btn" disabled={(pagination.page * pagination.pageSize) >= pagination.total} onClick={() => setPagination(p => ({ ...p, page: p.page + 1 }))}>Next</button>
-            </div>
-          </div>
-
-          {loading ? <div style={{ padding: 32, textAlign: "center", color: "var(--muted)" }}>Loading…</div> : (
-            <SimpleTable columns={columns} data={rows} emptyMessage="No books found" />
-          )}
+          <div className="h-64 bg-slate-100 rounded-2xl"></div>
         </div>
       </div>
-
-      {/* Modal: backdrop closes only when clicking backdrop itself (target === currentTarget) to avoid file dialog auto-close */}
-      {modalOpen && (
-        <div
-          style={{
-            position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center",
-            background: "linear-gradient(180deg, rgba(2,6,23,0.45), rgba(2,6,23,0.35))", zIndex: 9999
-          }}
-          onClick={(e) => {
-            // close only when clicking the backdrop, not when file dialog or inner clicks happen
-            if (e.target === e.currentTarget) {
-              setModalOpen(false);
-              setEditing(null);
-              if (filePreview && filePreview.startsWith("blob:")) {
-                try { URL.revokeObjectURL(filePreview); } catch (err) {}
-              }
-            }
-          }}
+    );
+  }
+  
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50/30 p-4 md:p-6">
+      <main className="max-w-7xl mx-auto">
+        {/* Header */}
+        <motion.div
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-6"
         >
-          <form
-            onSubmit={handleSave}
-            className="modal-plate"
-            onClick={(e) => e.stopPropagation()}
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-            <div className="modal-header-bar">
-              <img src={headerLogo} alt="Ank Logo" onError={(e) => { e.currentTarget.src = headerLogo; }} />
-              <div className="modal-title">{editing ? "Edit Book" : "Create a New Book"}</div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button type="button" className="btn" onClick={() => { setModalOpen(false); setEditing(null); }}>Cancel</button>
-                <button type="submit" className="btn btn-primary" title="Save">
-                  <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
-                    <ERPIcons.Save style={{ width: 16, height: 16 }} /> {editing ? "Save changes" : "Create book"}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
+            <div>
+              <h1 className="text-2xl md:text-3xl font-bold text-slate-900">
+                Books Management
+              </h1>
+              <p className="text-slate-600 mt-2">
+                Manage books, link to courses, mediums, and standards with image uploads
+              </p>
+            </div>
+            
+            <div className="flex flex-wrap items-center gap-3">
+              <ExportCSV 
+                columns={tableColumns.filter((_, i) => i !== 0 && i !== tableColumns.length - 1)} 
+                rows={rows} 
+                filename={`books_export_${new Date().toISOString().slice(0,10)}.csv`}
+              />
+              
+              {selectedRows.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-slate-600">
+                    {selectedRows.length} selected
                   </span>
-                </button>
-              </div>
-            </div>
-
-            <div className="modal-body-grid">
-              <div>
-                <div style={{ display: "grid", gap: 12 }}>
-                  <FormField label="Book name" required>
-                    <TextInput value={form.book_name} onChange={(v) => setForm(f => ({ ...f, book_name: v }))} />
-                  </FormField>
-
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                    <FormField label="Price">
-                      <TextInput type="number" value={form.price} onChange={(v) => setForm(f => ({ ...f, price: v }))} />
-                    </FormField>
-
-                    <FormField label="Course">
-                      <Select options={[{ value: "", label: "— none —" }, ...(courses || []).map(c => ({ value: c.course_id, label: c.course_name }))]} value={form.course_id || ""} onChange={(v) => setForm(f => ({ ...f, course_id: v }))} />
-                    </FormField>
-                  </div>
-
-                  <FormField label="Description">
-                    <textarea value={form.description} onChange={(e) => setForm(f => ({ ...f, description: e.target.value }))} className="form-control" rows={4} />
-                  </FormField>
-
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <FormField label="Medium" className="control" style={{ flex: 1 }}>
-                      <Select options={[{ value: "", label: "— none —" }, ...(mediums || []).map(m => ({ value: m.medium_id, label: m.medium_name }))]} value={form.medium_id || ""} onChange={(v) => setForm(f => ({ ...f, medium_id: v }))} />
-                    </FormField>
-
-                    <FormField label="Standard" className="control" style={{ flex: 1 }}>
-                      <Select options={[{ value: "", label: "— none —" }, ...(standards || []).map(s => ({ value: s.std_id, label: s.std_name }))]} value={form.std_id || ""} onChange={(v) => setForm(f => ({ ...f, std_id: v }))} />
-                    </FormField>
-                  </div>
-
-                  <FormField label="Image URL (or use Upload)" help="Paste a remote URL to preview immediately">
-                    <TextInput placeholder="https://..." value={form.image || ""} onChange={(v) => onImageUrlChange(v)} />
-                  </FormField>
-                </div>
-              </div>
-
-              <div>
-                {/* inside modal-body-grid, in the right column */}
-                <FormField label="Upload Image">
-                  {/* STOP PROPAGATION WRAPPER: prevents file input clicks from reaching backdrop */}
-                  <div
-                    onClick={(e) => e.stopPropagation()}
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onFocus={(e) => e.stopPropagation()}
-                    style={{ display: 'block' }}
+                  <DangerBtn
+                    size="sm"
+                    onClick={handleBulkDelete}
+                    className="flex items-center gap-2"
                   >
-                    <FileInput accept="image/*" onChange={onFileSelected} />
-                  </div>
+                    <ERPIcons.Delete className="w-4 h-4" />
+                    Delete Selected
+                  </DangerBtn>
+                  <OutlineBtn
+                  onClick={handleBulkExport}
+                  leftIcon={ERPIcons.DownloadCloud}
+                >
+                  </OutlineBtn>
+
+                </div>
+              )}
+              
+              <PrimaryBtn
+                onClick={handleCreate}
+                className="flex items-center gap-2"
+              >
+                <ERPIcons.Plus className="w-5 h-5" />
+                Add New Book
+              </PrimaryBtn>
+            </div>
+          </div>
+        </motion.div>
+        
+        {/* Filters Card */}
+        <Card className="mb-6" elevated>
+          <CardHeader
+            title="Filters & Search"
+            subtitle="Filter books by different criteria"
+            icon={ERPIcons.Filter}
+          />
+          <CardBody>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <FormField label="Search Books">
+                <SearchInput
+                  placeholder="Search by name or description..."
+                  value={searchQuery}
+                  onChange={setSearchQuery}
+                  className="w-full"
+                />
+              </FormField>
+              
+              <FormField label="Course">
+                <Select
+                  value={filters.course_id}
+                  onChange={(v) => handleFilterChange('course_id', v)}
+                  options={courseOptions}
+                  className="w-full"
+                />
+              </FormField>
+              
+              <FormField label="Medium">
+                <Select
+                  value={filters.medium_id}
+                  onChange={(v) => handleFilterChange('medium_id', v)}
+                  options={mediumOptions}
+                  className="w-full"
+                />
+              </FormField>
+              
+              <FormField label="Standard">
+                <Select
+                  value={filters.std_id}
+                  onChange={(v) => handleFilterChange('std_id', v)}
+                  options={standardOptions}
+                  className="w-full"
+                />
+              </FormField>
+            </div>
+            
+            <div className="flex items-center justify-between mt-4 pt-4 border-t border-slate-100">
+              <div className="text-sm text-slate-500">
+                {pagination.total} books found
+              </div>
+              
+              <div className="flex items-center gap-2">
+                <OutlineBtn onClick={handleResetFilters} leftIcon={ERPIcons.Refresh}>
+  Reset Filters
+</OutlineBtn>
+
+
+                
+                <SecondaryBtn
+                  onClick={fetchBooks}
+                  className="flex items-center gap-2"
+                >
+                  <ERPIcons.Refresh className="w-4 h-4" />
+                  Refresh
+                </SecondaryBtn>
+              </div>
+            </div>
+          </CardBody>
+        </Card>
+        
+        {/* Books Table Card */}
+        <Card elevated>
+          <CardHeader
+            title="Books"
+            subtitle={`Showing ${rows.length} of ${pagination.total} books`}
+            icon={ERPIcons.File}
+            actions={
+              <div className="flex items-center gap-3">
+                <FormField label="Rows per page">
+                  <select
+                    value={pagination.pageSize}
+                    onChange={(e) => setPagination(prev => ({ 
+                      ...prev, 
+                      pageSize: Number(e.target.value),
+                      page: 1 
+                    }))}
+                    className="px-3 py-2 border border-slate-300 rounded-md bg-white"
+                  >
+                    {PAGE_SIZE_OPTIONS.map(size => (
+                      <option key={size} value={size}>{size}</option>
+                    ))}
+                  </select>
                 </FormField>
-
-
-                <div style={{ marginTop: 12 }}>
-                  <div style={{ fontSize: 13, color: "#374151", marginBottom: 6 }}>Preview</div>
-                  <div className="preview-card">
-                    <img src={filePreview || imgOrDefault(form.image)} alt="preview" style={{ width: 140, height: 100, objectFit: "cover", borderRadius: 8 }} />
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 700, color: "#0f172a" }}>{form.book_name || "Untitled book"}</div>
-                      <div className="small-muted" style={{ marginTop: 6 }}>{form.description ? (String(form.description).slice(0, 160) + (String(form.description).length > 160 ? "…" : "")) : "No description yet"}</div>
-
-                      <div style={{ marginTop: 10, display: "flex", gap: 8 }}>
-                        <button type="button" className="btn" onClick={() => { 
-                          // cleanup blob URL if present
-                          if (filePreview && filePreview.startsWith("blob:")) {
-                            try { URL.revokeObjectURL(filePreview); } catch (err) {}
-                          }
-                          setFilePreview(defaultImg); fileRef.current = null; setForm(f => ({ ...f, image: "" })); 
-                        }}>Reset</button>
-                        <div style={{ marginLeft: "auto", textAlign: "right" }}>
-                          <div className="small-muted">Status</div>
-                          <div style={{ fontWeight: 700, color: uploading ? "#0ea5a4" : "#64748b" }}>{uploading ? "Uploading…" : (editing ? "Ready to save" : "New")}</div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div style={{ marginTop: 12, fontSize: 13 }} className="small-muted">
-                    Tip: Uploaded image will be persisted to the server when upload endpoint exists; otherwise a local data-URL will be used for immediate preview.
+              </div>
+            }
+          />
+          
+          <CardBody className="p-0">
+            {loading ? (
+              <div className="p-12 text-center">
+                <div className="inline-flex flex-col items-center gap-4">
+                  <svg className="animate-spin w-8 h-8 text-slate-400" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" fill="none" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                  </svg>
+                  <p className="text-slate-500">Loading books...</p>
+                </div>
+              </div>
+            ) : rows.length === 0 ? (
+              <div className="p-12 text-center">
+                <div className="inline-flex flex-col items-center gap-4 max-w-md">
+                  <ERPIcons.File className="w-16 h-16 text-slate-300" />
+                  <div>
+                    <h3 className="text-lg font-semibold text-slate-700 mb-2">No books found</h3>
+                    <p className="text-slate-500 mb-6">
+                      {searchQuery || Object.values(filters).some(Boolean)
+                        ? "Try adjusting your search or filters"
+                        : "Get started by adding your first book"
+                      }
+                    </p>
+                    {!searchQuery && Object.values(filters).every(v => !v) && (
+                      <PrimaryBtn onClick={handleCreate}>
+                        Add Your First Book
+                      </PrimaryBtn>
+                    )}
                   </div>
                 </div>
               </div>
-            </div>
-
-            <div className="modal-footer-bar">
-              <button type="button" className="btn" onClick={() => { 
-                setModalOpen(false); setEditing(null); 
-                if (filePreview && filePreview.startsWith("blob:")) {
-                  try { URL.revokeObjectURL(filePreview); } catch (err) {}
-                }
-              }}>Close</button>
-              <button type="submit" className="btn btn-primary">{editing ? "Save changes" : "Create book"}</button>
-            </div>
-          </form>
-        </div>
-      )}
-    </main>
+            ) : (
+              <>
+                <div className="overflow-x-auto">
+                  <SimpleTable 
+                    columns={tableColumns}
+                    data={rows}
+                    emptyMessage="No books found"
+                    className="min-w-full"
+                  />
+                </div>
+                
+                <CardFooter align="between">
+                  <div className="text-sm text-slate-500">
+                    Page {pagination.page} of {pagination.totalPages}
+                  </div>
+                  
+                  <Pagination
+                    currentPage={pagination.page}
+                    totalPages={pagination.totalPages}
+                    onPageChange={handlePageChange}
+                    showNumbers={true}
+                    className="flex items-center gap-1"
+                  />
+                </CardFooter>
+              </>
+            )}
+          </CardBody>
+        </Card>
+      </main>
+      
+      {/* Book Modal */}
+      <AnimatePresence>
+        {modalOpen && (
+          <BookModal
+            editing={editing}
+            form={form}
+            formErrors={formErrors}
+            filePreview={filePreview}
+            uploading={uploading}
+            uploadProgress={uploadProgress}
+            courses={courses}
+            mediums={mediums}
+            standards={standards}
+            onClose={handleModalClose}
+            onSave={handleSave}
+            onFormChange={setForm}
+            onFileSelect={handleFileSelect}
+            onImageUrlChange={(url) => {
+              setForm(prev => ({ ...prev, image: url }));
+              setFilePreview(imgOrDefault(url));
+              fileRef.current = null;
+            }}
+            headerLogo={headerLogo}
+          />
+        )}
+      </AnimatePresence>
+    </div>
   );
 }
 
-/* Helper used in JSX above */
-function mkOpts(list, idKey, labelKey) {
-  return [{ value: "", label: "— any —" }].concat((list || []).map(x => ({ value: x[idKey], label: x[labelKey] })));
-}
+// Book Modal Component
+const BookModal = ({
+  editing,
+  form,
+  formErrors,
+  filePreview,
+  uploading,
+  uploadProgress,
+  courses,
+  mediums,
+  standards,
+  onClose,
+  onSave,
+  onFormChange,
+  onFileSelect,
+  onImageUrlChange,
+  headerLogo
+}) => {
+  const [localImageUrl, setLocalImageUrl] = useState(form.image || "");
+  
+  const handleLocalUrlChange = (url) => {
+    setLocalImageUrl(url);
+    onImageUrlChange(url);
+  };
+  
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.95, y: 20 }}
+        animate={{ scale: 1, y: 0 }}
+        exit={{ scale: 0.95, y: 20 }}
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between p-6 border-b border-slate-200 bg-gradient-to-r from-slate-50 to-white">
+          <div className="flex items-center gap-4">
+            <img 
+              src={headerLogo} 
+              alt="Logo" 
+              className="h-12 w-12 rounded-lg object-contain"
+              onError={(e) => { e.target.src = headerLogo; }}
+            />
+            <div>
+              <h2 className="text-xl font-bold text-slate-900">
+                {editing ? "Edit Book" : "Add New Book"}
+              </h2>
+              <p className="text-slate-600 text-sm">
+                {editing ? "Update book details" : "Fill in the book information"}
+              </p>
+            </div>
+          </div>
+          
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+            aria-label="Close"
+          >
+            <ERPIcons.Close className="w-5 h-5 text-slate-500" />
+          </button>
+        </div>
+        
+        {/* Form */}
+        <form onSubmit={onSave} className="flex-1 overflow-y-auto">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 p-6">
+            {/* Left Column - Basic Info */}
+            <div className="lg:col-span-2 space-y-6">
+              <FormField 
+                label="Book Name" 
+                required
+                error={formErrors.book_name}
+              >
+                <TextInput
+                  value={form.book_name}
+                  onChange={(v) => onFormChange({ ...form, book_name: v })}
+                  placeholder="Enter book name"
+                  className="w-full"
+                />
+              </FormField>
+              
+              <FormField 
+                label="Description"
+                help="Provide a brief description of the book"
+              >
+                <textarea
+                  value={form.description}
+                  onChange={(e) => onFormChange({ ...form, description: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-md min-h-[120px] resize-y"
+                  placeholder="Enter book description..."
+                />
+              </FormField>
+              
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <FormField label="Price" error={formErrors.price}>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">₹</span>
+                    <TextInput
+                      type="number"
+                      value={form.price}
+                      onChange={(v) => onFormChange({ ...form, price: v })}
+                      placeholder="0.00"
+                      className="w-full pl-8"
+                    />
+                  </div>
+                </FormField>
+                
+                <FormField label="Course">
+                  <Select
+                    value={form.course_id || ""}
+                    onChange={(v) => onFormChange({ ...form, course_id: v })}
+                    options={[{ value: "", label: "Select Course" }, ...courses.map(c => ({
+                      value: c.course_id,
+                      label: c.course_name
+                    }))]}
+                    className="w-full"
+                  />
+                </FormField>
+                
+                <FormField label="Medium">
+                  <Select
+                    value={form.medium_id || ""}
+                    onChange={(v) => onFormChange({ ...form, medium_id: v })}
+                    options={[{ value: "", label: "Select Medium" }, ...mediums.map(m => ({
+                      value: m.medium_id,
+                      label: m.medium_name
+                    }))]}
+                    className="w-full"
+                  />
+                </FormField>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormField label="Standard">
+                  <Select
+                    value={form.std_id || ""}
+                    onChange={(v) => onFormChange({ ...form, std_id: v })}
+                    options={[{ value: "", label: "Select Standard" }, ...standards.map(s => ({
+                      value: s.std_id,
+                      label: s.std_name
+                    }))]}
+                    className="w-full"
+                  />
+                </FormField>
+                
+                <FormField 
+                  label="Image URL"
+                  help="Or paste an image URL directly"
+                >
+                  <TextInput
+                    value={localImageUrl}
+                    onChange={handleLocalUrlChange}
+                    placeholder="https://example.com/image.jpg"
+                    className="w-full"
+                  />
+                </FormField>
+              </div>
+            </div>
+            
+            {/* Right Column - Image Preview & Upload */}
+            <div className="space-y-6">
+              <FormField label="Upload Image">
+                <FileInput
+                  accept="image/*"
+                  onChange={onFileSelect}
+                  className="w-full"
+                />
+                <p className="text-xs text-slate-500 mt-2">
+                  Supports JPG, PNG, GIF (max 5MB)
+                </p>
+              </FormField>
+              
+              {/* Upload Progress */}
+              {uploading && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-slate-600">Uploading...</span>
+                    <span className="font-medium">{uploadProgress}%</span>
+                  </div>
+                  <div className="h-2 bg-slate-200 rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-gradient-to-r from-cyan-500 to-teal-500 transition-all duration-300"
+                      style={{ width: `${uploadProgress}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+              
+              {/* Image Preview */}
+              <div className="border border-slate-200 rounded-xl p-4 bg-gradient-to-br from-slate-50 to-white">
+                <h3 className="font-medium text-slate-700 mb-4">Preview</h3>
+                
+                <div className="space-y-4">
+                  <div className="relative">
+                    <img
+                      src={filePreview}
+                      alt="Book preview"
+                      className="w-full h-48 object-cover rounded-lg border border-slate-200"
+                      onError={(e) => {
+                        e.target.src = defaultImg;
+                      }}
+                    />
+                    
+                    <div className="absolute top-2 right-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onImageUrlChange("");
+                          setLocalImageUrl("");
+                        }}
+                        className="p-2 bg-white/80 backdrop-blur-sm rounded-lg shadow-sm hover:bg-white"
+                      >
+                        <ERPIcons.Close className="w-4 h-4 text-slate-600" />
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium text-slate-700">
+                        {form.book_name || "Untitled Book"}
+                      </span>
+                      {form.price && (
+                        <span className="text-sm font-bold text-emerald-700">
+                          ₹{parseFloat(form.price).toFixed(2)}
+                        </span>
+                      )}
+                    </div>
+                    
+                    {form.description && (
+                      <p className="text-sm text-slate-600 line-clamp-2">
+                        {form.description}
+                      </p>
+                    )}
+                    
+                    <div className="flex items-center gap-2 text-xs text-slate-500">
+                      <span>{form.course_id ? "Course Linked" : "No Course"}</span>
+                      <span>•</span>
+                      <span>{form.medium_id ? "Medium Set" : "No Medium"}</span>
+                      <span>•</span>
+                      <span>{form.std_id ? "Standard Set" : "No Standard"}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Help Text */}
+              <div className="text-sm text-slate-500 bg-slate-50 rounded-lg p-3">
+                <p className="font-medium mb-1">Tips:</p>
+                <ul className="space-y-1">
+                  <li>• Upload or paste an image URL for the book cover</li>
+                  <li>• Fill in pricing for accurate inventory tracking</li>
+                  <li>• Link to course/medium/standard for better organization</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+          
+          {/* Footer */}
+          <div className="flex items-center justify-between p-6 border-t border-slate-200 bg-slate-50/50">
+            <div className="text-sm text-slate-500">
+              {editing ? "Update book details" : "Create a new book entry"}
+            </div>
+            
+            <div className="flex items-center gap-3">
+              <OutlineBtn
+                type="button"
+                onClick={onClose}
+                className="px-6"
+              >
+                Cancel
+              </OutlineBtn>
+              
+              <PrimaryBtn
+                type="submit"
+                className="px-6 flex items-center gap-2"
+              >
+                {uploading ? (
+                  <>
+                    <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" fill="none" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                    </svg>
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <ERPIcons.Save className="w-4 h-4" />
+                    {editing ? "Save Changes" : "Create Book"}
+                  </>
+                )}
+              </PrimaryBtn>
+            </div>
+          </div>
+        </form>
+      </motion.div>
+    </motion.div>
+  );
+};
