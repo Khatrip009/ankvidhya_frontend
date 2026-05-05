@@ -33,7 +33,10 @@ function useOnlineStatus() {
   return isOnline;
 }
 
-/** Hook: fetch dashboard summary with caching, retry, and refresh logic */
+/**
+ * Hook: fetch dashboard summary with caching, retry, and refresh logic.
+ * Custom headers removed to avoid CORS issues.
+ */
 function useDashboardSummary() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -54,8 +57,8 @@ function useDashboardSummary() {
       if (cached && ts && Date.now() - parseInt(ts, 10) < CACHE_MAX_AGE) {
         return JSON.parse(cached);
       }
-    } catch (err) {
-      // Ignore corrupt cache
+    } catch {
+      /* ignore corrupt cache */
     }
     return null;
   }, []);
@@ -64,37 +67,37 @@ function useDashboardSummary() {
     try {
       localStorage.setItem(CACHE_KEY, JSON.stringify(payload));
       localStorage.setItem(TIMESTAMP_KEY, Date.now().toString());
-    } catch (err) {
-      // Storage full or disabled
+    } catch {
+      /* storage full or disabled */
     }
   }, []);
 
+  /**
+   * fetchData – stable reference because dependencies are stable.
+   * No 'Cache-Control' header to prevent CORS rejection.
+   */
   const fetchData = useCallback(
     async (skipCache = false) => {
-      // Immediately try cache if not skipping
+      // Serve fresh cache immediately if available (and not skipping)
       if (!skipCache) {
         const cachedData = loadFromCache();
         if (cachedData) {
           setData(cachedData);
-          setLastUpdated(new Date(parseInt(localStorage.getItem(TIMESTAMP_KEY), 10)));
+          setLastUpdated(
+            new Date(parseInt(localStorage.getItem(TIMESTAMP_KEY), 10))
+          );
           setLoading(false);
         }
       }
 
       try {
         setError(null);
-        // Don't set loading true if we already showed cached data (smooth transition)
         if (!data) setLoading(true);
 
         const res = await api.get("/api/dashboard/summary", {
-          headers: {
-            "Cache-Control": "no-cache",
-            Pragma: "no-cache",
-          },
           timeout: 10000,
         });
 
-        // Extract data based on API wrapper
         const newData = res?.data?.data ? res.data.data : res?.data || {};
 
         if (isMounted.current) {
@@ -140,10 +143,10 @@ function useDashboardSummary() {
         }
       }
     },
-    [data, loadFromCache, saveToCache]
+    [loadFromCache, saveToCache] // no 'data' – avoids circular dependency
   );
 
-  // Auto-retry on error
+  // Auto-retry on error (up to 3 times)
   useEffect(() => {
     if (error && retryCount < 3) {
       retryTimer.current = setTimeout(() => {
@@ -154,7 +157,7 @@ function useDashboardSummary() {
     return () => clearTimeout(retryTimer.current);
   }, [error, retryCount, fetchData]);
 
-  // Refresh data periodically when tab is visible and online
+  // Periodic auto-refresh & visibility listener
   useEffect(() => {
     const interval = setInterval(() => {
       if (document.visibilityState === "visible" && navigator.onLine) {
@@ -186,12 +189,8 @@ function useDashboardSummary() {
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Refresh callback for manual use
-  const refresh = useCallback(() => {
-    fetchData(true);
-  }, [fetchData]);
+  const refresh = useCallback(() => fetchData(true), [fetchData]);
 
-  // Clear cache helper
   const clearCache = useCallback(() => {
     localStorage.removeItem(CACHE_KEY);
     localStorage.removeItem(TIMESTAMP_KEY);
@@ -224,13 +223,15 @@ export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState("overview");
   const [isExporting, setIsExporting] = useState(false);
 
-  // Performance metrics derived from data
+  // Derived performance metrics
   const performanceMetrics = useMemo(() => {
     if (!summaryRaw) return null;
     const totalInquiries = summaryRaw.totalInquiries || 0;
     const totalOrders = summaryRaw.totalOrders || 0;
     const conversionRate =
-      totalInquiries > 0 ? ((totalOrders / totalInquiries) * 100).toFixed(1) : 0;
+      totalInquiries > 0
+        ? ((totalOrders / totalInquiries) * 100).toFixed(1)
+        : 0;
     const totalRevenue = summaryRaw.totalRevenue || 0;
     const avgOrderValue =
       totalOrders > 0 ? (totalRevenue / totalOrders).toFixed(0) : 0;
@@ -241,7 +242,7 @@ export default function AdminDashboard() {
     };
   }, [summaryRaw]);
 
-  // Export data as JSON file
+  // Export data as JSON
   const handleExport = () => {
     if (!summaryRaw) return;
     setIsExporting(true);
@@ -263,14 +264,15 @@ export default function AdminDashboard() {
     }
   };
 
-  // Mobile pull-to-refresh (simplified button) – we rely on manual button
-  const scrollRef = useRef(null);
+  // Fallback icon component if ERPIcons missing a specific icon
+  const SafeIcon = ({ icon, className }) => {
+    const Icon = ERPIcons?.[icon];
+    return Icon ? <Icon className={className} aria-hidden="true" /> : null;
+  };
 
-  // Render loading skeleton
+  // Loading skeleton only when there's no data yet
   if (loadingSummary && !summaryRaw) {
-    return (
-      <LoadingSkeleton />
-    );
+    return <LoadingSkeleton />;
   }
 
   return (
@@ -278,7 +280,6 @@ export default function AdminDashboard() {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       className="min-h-screen bg-white p-4 sm:p-6 lg:p-8 flex flex-col"
-      ref={scrollRef}
     >
       <div className="max-w-7xl mx-auto w-full flex-1">
         {/* Header */}
@@ -294,7 +295,11 @@ export default function AdminDashboard() {
                   className="inline-flex items-center gap-1 bg-gray-100 rounded-full px-2.5 py-0.5 text-xs font-medium"
                   aria-live="polite"
                 >
-                  Updated {lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  Updated{" "}
+                  {lastUpdated.toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
                 </span>
               )}
             </div>
@@ -319,7 +324,7 @@ export default function AdminDashboard() {
               className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border bg-white shadow-sm hover:bg-gray-50 transition disabled:opacity-50"
               aria-label="Export dashboard data"
             >
-              <ERPIcons.Download className="w-4 h-4" aria-hidden="true" />
+              <SafeIcon icon="Download" className="w-4 h-4" />
               <span className="hidden sm:inline">Export</span>
             </button>
 
@@ -352,7 +357,7 @@ export default function AdminDashboard() {
                   />
                 </svg>
               ) : (
-                <ERPIcons.Refresh className="w-4 h-4" aria-hidden="true" />
+                <SafeIcon icon="Refresh" className="w-4 h-4" />
               )}
               <span className="hidden sm:inline">
                 {loadingSummary ? "Refreshing" : "Refresh"}
@@ -362,9 +367,11 @@ export default function AdminDashboard() {
         </header>
 
         {/* Tabs – horizontal scrollable on mobile */}
-        <nav className="flex overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0 border-b border-gray-200 mb-6 gap-1" aria-label="Dashboard sections">
+        <nav
+          className="flex overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0 border-b border-gray-200 mb-6 gap-1"
+          aria-label="Dashboard sections"
+        >
           {TABS.map((tab) => {
-            const Icon = ERPIcons[tab.icon];
             const isActive = activeTab === tab.id;
             return (
               <button
@@ -379,7 +386,7 @@ export default function AdminDashboard() {
                 aria-selected={isActive}
                 aria-controls={`panel-${tab.id}`}
               >
-                {Icon && <Icon className="w-4 h-4" aria-hidden="true" />}
+                <SafeIcon icon={tab.icon} className="w-4 h-4" />
                 {tab.label}
               </button>
             );
@@ -408,7 +415,7 @@ export default function AdminDashboard() {
                 />
               </div>
 
-              {/* Derived metrics (mobile: single column, sm: two, md: three) */}
+              {/* Derived metrics */}
               {performanceMetrics && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
                   <StatCard
@@ -434,7 +441,7 @@ export default function AdminDashboard() {
                 </div>
               )}
 
-              {/* Charts – responsive columns */}
+              {/* Charts */}
               <div className="space-y-6">
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                   <div className="lg:col-span-2">
@@ -521,7 +528,7 @@ export default function AdminDashboard() {
             role="alert"
           >
             <div className="flex items-start gap-3">
-              <ERPIcons.Warning className="w-5 h-5 text-rose-500 flex-shrink-0 mt-0.5" aria-hidden="true" />
+              <SafeIcon icon="Warning" className="w-5 h-5 text-rose-500 flex-shrink-0 mt-0.5" />
               <div className="flex-1 min-w-0">
                 <h3 className="font-medium text-rose-800">Data Load Error</h3>
                 <p className="text-sm text-rose-600 mt-1">{errorSummary}</p>
@@ -536,7 +543,7 @@ export default function AdminDashboard() {
           </motion.div>
         )}
 
-        {/* Footer with cache info and help */}
+        {/* Footer with cache info */}
         {lastUpdated && !errorSummary && (
           <div className="mt-8 pt-6 border-t border-gray-100 text-sm text-gray-500 flex flex-col sm:flex-row justify-between gap-2">
             <span>
@@ -557,10 +564,10 @@ export default function AdminDashboard() {
 
         {/* Quick tip */}
         <div className="mt-6 p-3 bg-gray-50 rounded-lg text-sm text-gray-600 flex items-start gap-3">
-          <ERPIcons.Info className="w-5 h-5 text-gray-400 flex-shrink-0 mt-0.5" aria-hidden="true" />
+          <SafeIcon icon="Info" className="w-5 h-5 text-gray-400 flex-shrink-0 mt-0.5" />
           <span>
-            <strong>Tip:</strong> This dashboard is fully responsive. On mobile, scroll charts horizontally
-            for best viewing. Data is cached for faster loads.
+            <strong>Tip:</strong> This dashboard is fully responsive. On mobile, scroll charts
+            horizontally for best viewing. Data is cached for faster loads.
           </span>
         </div>
       </div>
@@ -568,7 +575,7 @@ export default function AdminDashboard() {
   );
 }
 
-// ==================== Loading Skeleton (Mobile‑first) ====================
+// ==================== Loading Skeleton ====================
 
 function LoadingSkeleton() {
   return (
@@ -593,7 +600,7 @@ function LoadingSkeleton() {
           ))}
         </div>
 
-        {/* KPI skeleton cards – mobile: stack, sm: 2 col, lg: 4 col */}
+        {/* KPI skeleton cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           {[1, 2, 3, 4].map((n) => (
             <LoadingCard key={n} variant="detailed" lines={2} />
