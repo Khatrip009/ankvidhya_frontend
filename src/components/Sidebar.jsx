@@ -87,7 +87,6 @@ export default function Sidebar({ className = "", onClose } = {}) {
   const { user } = useAuth();
   const location = useLocation();
 
-  // Permissions fallback
   let perms = [];
   try {
     perms = JSON.parse(localStorage.getItem("permissions") || "[]");
@@ -98,7 +97,7 @@ export default function Sidebar({ className = "", onClose } = {}) {
   const canAdmin = () =>
     role.includes("admin") || role.includes("super") || role.includes("manager");
 
-  // Accordion state (only one open at a time)
+  // Accordion state (allow multiple open sections)
   const [open, setOpen] = useState({
     schools: false,
     faculty: false,
@@ -109,23 +108,21 @@ export default function Sidebar({ className = "", onClose } = {}) {
   // Auto-open section based on current path
   useEffect(() => {
     const p = location.pathname;
+    const newOpen = { schools: false, faculty: false, academics: false, reports: false };
     if (p.startsWith("/admin/schools") || p.startsWith("/admin/inquiries") || p.startsWith("/admin/orders") || p.startsWith("/admin/strengths")) {
-      setOpen({ schools: true, faculty: false, academics: false, reports: false });
+      newOpen.schools = true;
     } else if (p.startsWith("/admin/faculty")) {
-      setOpen({ schools: false, faculty: true, academics: false, reports: false });
+      newOpen.faculty = true;
     } else if (p.startsWith("/admin/academics")) {
-      setOpen({ schools: false, faculty: false, academics: true, reports: false });
+      newOpen.academics = true;
     } else if (p.startsWith("/admin/reports")) {
-      setOpen({ schools: false, faculty: false, academics: false, reports: true });
+      newOpen.reports = true;
     }
+    setOpen(prev => ({ ...prev, ...newOpen }));
   }, [location.pathname]);
 
   const toggle = (section) => {
-    setOpen((prev) => {
-      const newState = { schools: false, faculty: false, academics: false, reports: false };
-      newState[section] = !prev[section];
-      return newState;
-    });
+    setOpen(prev => ({ ...prev, [section]: !prev[section] }));
   };
 
   const closeIfMobile = () => {
@@ -135,9 +132,11 @@ export default function Sidebar({ className = "", onClose } = {}) {
   return (
     <aside
       className={`sidebar h-full bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 
-        flex flex-col p-4 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700
-        w-full max-w-xs md:max-w-sm lg:max-w-md
-        ${className}`}
+        flex flex-col p-4 overflow-y-auto
+        w-64             /* fixed width on all screens (desktop sidebar) */
+        lg:w-72          /* slightly wider on large screens */
+        ${className}
+      `}
       aria-label="Main navigation"
     >
       {/* User info */}
@@ -304,7 +303,7 @@ export default function Sidebar({ className = "", onClose } = {}) {
         </div>
       )}
 
-      {/* Optional footer */}
+      {/* Footer */}
       <div className="mt-auto pt-4 border-t border-slate-200 dark:border-slate-700 text-[10px] text-slate-400 dark:text-slate-500">
         © AnkVidhya ERP
       </div>
