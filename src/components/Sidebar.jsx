@@ -99,23 +99,20 @@ export default function Sidebar({ className = "", onClose } = {}) {
     reports: false,
   });
 
-  // Auto‑open the section that matches the current route
+  // Auto‑open appropriate section on route change
   useEffect(() => {
     const path = location.pathname;
-    setOpen(prev => {
-      const next = { schools: false, faculty: false, academics: false, reports: false };
-      if (path.startsWith("/admin/schools") || path.startsWith("/admin/inquiries") || path.startsWith("/admin/orders") || path.startsWith("/admin/strengths")) {
-        next.schools = true;
-      } else if (path.startsWith("/admin/faculty")) {
-        next.faculty = true;
-      } else if (path.startsWith("/admin/academics")) {
-        next.academics = true;
-      } else if (path.startsWith("/admin/reports")) {
-        next.reports = true;
-      }
-      // Preserve manually opened sections that aren't affected by route
-      return { ...prev, ...next };
-    });
+    const auto = { schools: false, faculty: false, academics: false, reports: false };
+    if (path.startsWith("/admin/schools") || path.startsWith("/admin/inquiries") || path.startsWith("/admin/orders") || path.startsWith("/admin/strengths")) {
+      auto.schools = true;
+    } else if (path.startsWith("/admin/faculty")) {
+      auto.faculty = true;
+    } else if (path.startsWith("/admin/academics")) {
+      auto.academics = true;
+    } else if (path.startsWith("/admin/reports")) {
+      auto.reports = true;
+    }
+    setOpen(prev => ({ ...prev, ...auto }));
   }, [location.pathname]);
 
   const toggle = (section) => {
@@ -129,15 +126,14 @@ export default function Sidebar({ className = "", onClose } = {}) {
   return (
     <aside
       className={`
-        sidebar flex flex-col border-r border-slate-200 bg-white
+        flex flex-col h-full w-full border-r border-slate-200 bg-white
         text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100
-        w-64 lg:w-72
         ${className}
       `}
       aria-label="Main navigation"
     >
-      {/* Scrollable content – fills available height */}
-      <div className="flex flex-1 flex-col overflow-y-auto p-4">
+      {/* Scrollable navigation – using min-h-0 prevents flex height collapse */}
+      <div className="flex-1 flex flex-col overflow-y-auto p-4 min-h-0">
         {/* User info */}
         <div className="mb-4 border-b border-slate-200 pb-4 dark:border-slate-700" aria-label="User information">
           <p className="text-xs text-slate-500 dark:text-slate-400">Signed in as</p>
@@ -309,14 +305,11 @@ export default function Sidebar({ className = "", onClose } = {}) {
             )}
           </div>
         )}
+      </div>
 
-        {/* Pushes footer to bottom */}
-        <div className="flex-1" />
-
-        {/* Footer */}
-        <div className="border-t border-slate-200 pt-3 text-[10px] text-slate-400 dark:border-slate-700 dark:text-slate-500">
-          © AnkVidhya ERP
-        </div>
+      {/* Footer – uses mt-auto to stick to bottom */}
+      <div className="border-t border-slate-200 px-4 py-3 text-[10px] text-slate-400 dark:border-slate-700 dark:text-slate-500">
+        © AnkVidhya ERP
       </div>
     </aside>
   );
