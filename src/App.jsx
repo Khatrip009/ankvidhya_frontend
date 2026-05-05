@@ -152,7 +152,6 @@ function ProtectedRoute({ children }) {
 =================================================== */
 function decideDashboardByRole(roleRaw = "") {
   const role = (roleRaw || "").toLowerCase();
-
   if (!role) return "/dashboard";
 
   if (
@@ -228,29 +227,39 @@ function InquiryRoute() {
 }
 
 /* ===================================================
-   Layout Container (Sidebar + Topbar)
+   Layout Container (Corrected Admin Structure)
 =================================================== */
 function Layout({ children }) {
   const location = useLocation();
   const hideHeader = location.pathname.startsWith("/login");
 
+  // Login page: no header / sidebar / footer
+  if (hideHeader) {
+    return <div className="min-h-screen bg-slate-50">{children}</div>;
+  }
+
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      {!hideHeader && <Topbar logoClass="h-10 w-10 object-contain" />}
+    <div className="min-h-screen flex flex-col bg-slate-50 dark:bg-slate-900">
+      {/* Topbar – sticky at top */}
+      <Topbar logoClass="h-10 w-10 object-contain" />
 
-      <div className="w-full flex">
-        {!hideHeader && <Sidebar className="hidden md:block w-64" />}
+      {/* Main horizontal area: sidebar + scrollable content */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Sidebar – visible on md+ ; fixed width, full height */}
+        <Sidebar className="hidden md:flex w-64 lg:w-72 flex-shrink-0" />
 
-        <main className="flex-1 min-h-screen py-8 px-6">{children}</main>
+        {/* Main content – scrolls vertically */}
+        <main className="flex-1 overflow-y-auto">
+          <div className="p-4 md:p-6 lg:p-8">{children}</div>
+
+          {/* Footer */}
+          <footer className="border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-slate-800">
+            <div className="py-4 px-4 md:px-6 lg:px-8 text-sm text-gray-500 dark:text-gray-400">
+              © {new Date().getFullYear()} AnkVidhya. Built with ❤️.
+            </div>
+          </footer>
+        </main>
       </div>
-
-      {!hideHeader && (
-        <footer className="border-t mt-12 bg-white">
-          <div className="w-full py-6 text-sm text-slate-500 px-6">
-            © {new Date().getFullYear()} AnkVidhya. Built with ❤️.
-          </div>
-        </footer>
-      )}
     </div>
   );
 }
@@ -338,7 +347,6 @@ function AppContainer() {
             </ProtectedRoute>
           }
         />
-
         <Route
           path="/admin/inquiries"
           element={
@@ -347,7 +355,6 @@ function AppContainer() {
             </ProtectedRoute>
           }
         />
-
         <Route
           path="/admin/orders"
           element={
@@ -364,7 +371,6 @@ function AppContainer() {
             </ProtectedRoute>
           }
         />
-
         <Route
           path="/admin/strengths"
           element={
@@ -373,7 +379,6 @@ function AppContainer() {
             </ProtectedRoute>
           }
         />
-
         <Route
           path="/admin/faculty"
           element={
@@ -382,7 +387,6 @@ function AppContainer() {
             </ProtectedRoute>
           }
         />
-
         <Route
           path="/admin/faculty/assign"
           element={
@@ -401,7 +405,6 @@ function AppContainer() {
             </ProtectedRoute>
           }
         />
-
         <Route
           path="/admin/academics/class-sessions"
           element={
@@ -410,7 +413,6 @@ function AppContainer() {
             </ProtectedRoute>
           }
         />
-
         <Route
           path="/admin/academics/courses"
           element={
@@ -419,7 +421,6 @@ function AppContainer() {
             </ProtectedRoute>
           }
         />
-
         <Route
           path="/admin/academics/books"
           element={
@@ -428,7 +429,6 @@ function AppContainer() {
             </ProtectedRoute>
           }
         />
-
         <Route
           path="/admin/academics/videos"
           element={
