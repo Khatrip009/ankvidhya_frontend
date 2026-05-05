@@ -1,97 +1,87 @@
 // src/pages/faculty.jsx
 import React, { useEffect, useState, useRef, useCallback } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import api from "../lib/api";
 import { ServerDataTable } from "../components/table.jsx";
-
 import {
-  CreateBtn,
   PrimaryBtn,
   SecondaryBtn,
-  FileUploadBtn,
-  SaveBtn,
-  CancelBtn,
-  DeleteBtn
+  OutlineBtn,
+  DangerBtn,
+  IconBtn,
 } from "../components/buttons.jsx";
-
 import {
   FormField,
   TextInput,
-  TextArea,
   Select,
-  FileInput,
-  Checkbox,
   ToggleSwitch,
-  DateInput
 } from "../components/input.jsx";
+import ERPIcons from "../components/icons.jsx";
+import { useToast } from "../hooks/useToast.jsx";
 
-/*
-  Faculty (Employees) page — React + componentized
-  Mirrors behavior from legacy employees.js but uses shared components and ERP theme
-*/
-
+// ---------- Constants ----------
 const DEFAULT_PAGE_SIZE = 10;
 const DEFAULT_PHOTO = "/images/ANK.png";
-const UPLOAD_MAX_BYTES = 200 * 1024; // 200 KB for faculty photos
+const MODAL_HEADER_LOGO = "/images/Ank_Logo.png";
+const UPLOAD_MAX_KB = 200;
 
-const ENDPOINTS = {
-  LIST: "/api/employees",
-  ONE: (id) => `/api/employees/${id}`,
-  IMPORT: "/api/employees/import-csv",
-  EXPORT_CSV: "/api/employees/export/csv",
-  EXPORT_XLSX: "/api/employees/export/excel",
-
-  STATES: "/api/master/states",
-  DISTRICTS: "/api/master/districts",
-  ROLES: "/api/master/roles",
-  DESIGNS: "/api/master/designations",
-  DEPTS: "/api/master/departments"
-};
-
+// ---------- Main Component ----------
 export default function FacultyPage() {
-  // table & filters
-  const [tableKey, setTableKey] = useState(0);
-  const [search, setSearch] = useState("");
-  const [stateId, setStateId] = useState("");
-  const [districtId, setDistrictId] = useState("");
-  const [roleId, setRoleId] = useState("");
-  const [designationId, setDesignationId] = useState("");
-  const [departmentId, setDepartmentId] = useState("");
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const toast = useToast();
 
-  // data caches
+  // Lookup data
   const [states, setStates] = useState([]);
   const [districts, setDistricts] = useState([]);
   const [roles, setRoles] = useState([]);
   const [designations, setDesignations] = useState([]);
   const [departments, setDepartments] = useState([]);
 
-  // modal
+  // Filters
+  const [search, setSearch] = useState("");
+  const [stateId, setStateId] = useState("");
+  const [districtId, setDistrictId] = useState("");
+  const [roleId, setRoleId] = useState("");
+  const [designationId, setDesignationId] = useState("");
+  const [departmentId, setDepartmentId] = useState("");
+
+  // Table refresh
+  const [tableKey, setTableKey] = useState(0);
+
+  // Modal
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState(defaultForm());
+  const [form, setForm] = useState(getDefaultForm());
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
+
+  // File upload
   const [isSelectingFile, setIsSelectingFile] = useState(false);
-
-  // synchronous ref to avoid race between setState and immediate checks (backdrop click)
   const isSelectingFileRef = useRef(false);
-
-  const hiddenFileRef = useRef(null);
+  const fileInputRef = useRef(null);
   const importRef = useRef(null);
 
+  // ------- Init -------
   useEffect(() => {
     loadMasters();
-    // clear selecting on window focus (file dialog closed)
     const onFocus = () => {
       setIsSelectingFile(false);
       isSelectingFileRef.current = false;
     };
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function defaultForm() {
+  // Respond to state change to reset district
+  useEffect(() => {
+    if (!stateId) return;
+    // If current district doesn't belong to selected state, clear it
+    const valid = districts.filter((d) => String(d.state_id) === String(stateId));
+    if (!valid.some((d) => String(d.district_id) === String(districtId))) {
+      setDistrictId("");
+    }
+  }, [stateId, districts]);
+
+  function getDefaultForm() {
     return {
       full_name: "",
       contact: "",
@@ -107,605 +97,726 @@ export default function FacultyPage() {
       create_user: false,
       username: "",
       user_email: "",
-      sync_user_role: false
+      sync_user_role: false,
     };
   }
 
+  // ------- Load lookup data -------
   async function loadMasters() {
     try {
-      const [s, r, dsg, dept] = await Promise.all([
-        api.get(ENDPOINTS.STATES).then(r => r.data || []),
-        api.get(ENDPOINTS.ROLES).then(r => r.data || []),
-        api.get(ENDPOINTS.DESIGNS).then(r => r.data || []),
-        api.get(ENDPOINTS.DEPTS).then(r => r.data || [])
+      const [sRes, rRes, dsgRes, deptRes, dRes] = await Promise.all([
+        api.get("/api/master/states"),
+        api.get("/api/master/roles"),
+        api.get("/api/master/designations"),
+        api.get("/api/master/departments"),
+        api.get("/api/master/districts"),
       ]);
-      setStates(s);
-      setRoles(r);
-      setDesignations(dsg);
-      setDepartments(dept);
-
-      // preload districts (all) — the master districts endpoint returns many; we keep local filter
-      const allDistricts = await api.get(ENDPOINTS.DISTRICTS).then(r => r.data || []);
-      setDistricts(allDistricts);
+      setStates(sRes?.data || []);
+      setRoles(rRes?.data || []);
+      setDesignations(dsgRes?.data || []);
+      setDepartments(deptRes?.data || []);
+      setDistricts(dRes?.data || []);
     } catch (err) {
       console.error("Failed to load masters", err);
-      setStates([]); setRoles([]); setDesignations([]); setDepartments([]); setDistricts([]);
+      toast.error("Failed to load dropdown data");
     }
   }
 
-  /* --------------------
-     Table columns + fetch
-     -------------------- */
-  const columns = [
-    {
-      Header: "Photo",
-      accessor: "image",
-      Cell: (r) => {
-        const src = r.image ? r.image : DEFAULT_PHOTO;
-        return (
-          <div className="h-12 w-12 overflow-hidden flex items-center justify-center bg-white rounded-md">
-            <img src={src} alt={r.full_name} className="h-full w-full object-cover" onError={(e) => (e.currentTarget.src = DEFAULT_PHOTO)} />
-          </div>
-        );
-      }
-    },
-    { Header: "Name", accessor: "full_name", Cell: (r) => (<div><div className="text-lg font-medium">{r.full_name}</div><div className="text-sm text-gray-500">{r.username || ""}</div></div>) },
-    { Header: "Contact", accessor: "contact" },
-    { Header: "Email", accessor: "email" },
-    { Header: "Role", accessor: "role_name" },
-    { Header: "Designation", accessor: "designation_name" },
-    { Header: "Dept", accessor: "department_name" },
-    { Header: "Location", accessor: "location", Cell: (r) => (<div className="text-sm">{r.state_name || "-"} / {r.district_name || "-"}</div>) },
-    {
-      Header: "Actions",
-      accessor: "actions",
-      Cell: (r) => (
-        <div className="flex gap-2">
-          <PrimaryBtn size="sm" onClick={(e) => { e.stopPropagation(); openEdit(r); }}>Edit</PrimaryBtn>
-          <DeleteBtn size="sm" onClick={(e) => { e.stopPropagation(); handleDelete(r.employee_id); }}>Delete</DeleteBtn>
-        </div>
-      )
-    }
-  ];
-
-  const onFetch = useCallback(async ({ page = 1, pageSize = DEFAULT_PAGE_SIZE, sortBy, sortDir }) => {
-    const q = {
-      page, pageSize,
-      search: search || undefined,
-      state_id: stateId || undefined,
-      district_id: districtId || undefined,
-      role_id: roleId || undefined,
-      designation_id: designationId || undefined,
-      department_id: departmentId || undefined
-    };
-    try {
-      const res = await api.get(ENDPOINTS.LIST, { query: q });
-      const rows = res.data || [];
-      const total = (res.pagination && res.pagination.total) || (res.total ?? rows.length) || 0;
-      return { data: rows, total };
-    } catch (err) {
-      console.error("fetch employees", err);
-      return { data: [], total: 0 };
-    }
-  }, [search, stateId, districtId, roleId, designationId, departmentId]);
-
-  /* --------------------
-     Modal: open/edit/close
-     -------------------- */
+  // ------- Modal helpers -------
   function openCreate() {
     setEditing(null);
-    setForm(defaultForm());
+    setForm(getDefaultForm());
     setErrors({});
     setModalOpen(true);
   }
 
-  async function openEdit(rowOrId) {
+  function openEdit(row) {
+    setEditing(row);
+    setForm({
+      full_name: row.full_name || "",
+      contact: row.contact || "",
+      email: row.email || "",
+      address: row.address || "",
+      dob: row.dob ? String(row.dob).slice(0, 10) : "",
+      state_id: row.state_id || "",
+      district_id: row.district_id || "",
+      role_id: row.role_id || "",
+      designation_id: row.designation_id || "",
+      department_id: row.department_id || "",
+      image: row.image || "",
+      create_user: !!(row.username || row.user_email),
+      username: row.username || "",
+      user_email: row.user_email || "",
+      sync_user_role: false,
+    });
     setErrors({});
-    if (typeof rowOrId === "object" && rowOrId) {
-      setEditing(rowOrId);
-      setForm(mapEmployeeToForm(rowOrId));
-      setModalOpen(true);
-      return;
-    }
-    // fetch by id
-    try {
-      const res = await api.get(ENDPOINTS.ONE(rowOrId));
-      const d = res?.data || null;
-      if (d) {
-        setEditing(d);
-        setForm(mapEmployeeToForm(d));
-        setModalOpen(true);
-      }
-    } catch (err) {
-      console.error("load employee", err);
-      window.ui?.toast?.("Failed to load employee", "danger");
-    }
+    setModalOpen(true);
   }
 
   function closeModal() {
-    // Use ref for immediate check
-    if (isSelectingFileRef.current) return; // ignore close while file picker active
+    if (isSelectingFileRef.current) return;
     setModalOpen(false);
     setEditing(null);
-    setErrors({});
   }
 
-  function mapEmployeeToForm(d) {
-    return {
-      full_name: d.full_name || "",
-      contact: d.contact || "",
-      email: d.email || "",
-      address: d.address || "",
-      dob: d.dob ? String(d.dob).substring(0, 10) : "",
-      state_id: d.state_id || "",
-      district_id: d.district_id || "",
-      role_id: d.role_id || "",
-      designation_id: d.designation_id || "",
-      department_id: d.department_id || "",
-      image: d.image || "",
-      create_user: !!(d.username || d.user_email),
-      username: d.username || "",
-      user_email: d.user_email || d.email || "",
-      sync_user_role: false
-    };
-  }
-
-  /* --------------------
-     File handling (photo upload)
-     -------------------- */
-  async function handlePhotoFiles(files) {
-    // ensure ref/state set immediately
+  // ------- File upload -------
+  function triggerFileInput() {
     isSelectingFileRef.current = true;
     setIsSelectingFile(true);
+    fileInputRef.current?.click();
+  }
 
-    const f = files && files[0];
-    if (!f) {
-      isSelectingFileRef.current = false;
-      setIsSelectingFile(false);
-      return;
-    }
-    if (f.size > UPLOAD_MAX_BYTES) {
-      const msg = `Photo too large — max ${Math.round(UPLOAD_MAX_BYTES / 1024)}KB`;
-      setErrors(e => ({ ...e, image: msg }));
-      window.ui?.toast?.(msg, "danger");
+  async function onFileSelected(e) {
+    const file = e.target.files?.[0];
+    if (!file) {
       isSelectingFileRef.current = false;
       setIsSelectingFile(false);
       return;
     }
 
-    // preview locally
+    if (file.size > UPLOAD_MAX_KB * 1024) {
+      toast.error(`Photo must be under ${UPLOAD_MAX_KB}KB`);
+      isSelectingFileRef.current = false;
+      setIsSelectingFile(false);
+      return;
+    }
+
+    // local preview
     const reader = new FileReader();
-    reader.onload = () => setForm(frm => ({ ...frm, image: reader.result }));
-    reader.readAsDataURL(f);
+    reader.onload = () => setForm((f) => ({ ...f, image: reader.result }));
+    reader.readAsDataURL(file);
 
-    // upload to server (try common endpoints)
+    await uploadPhoto(file);
+  }
+
+  async function uploadPhoto(file) {
     const fd = new FormData();
-    fd.append("photo", f);
-
+    fd.append("photo", file);
     const paths = ["/api/employees/upload-photo", "/api/employees/photo/upload"];
-    let lastErr = null;
-    for (const p of paths) {
+    for (const url of paths) {
       try {
-        const res = await api.post(p, fd, { headers: {} });
-        const url = res?.url || (res?.data && res.data.url) || (typeof res === "string" ? res : undefined);
-        if (url) {
-          setForm(frm => ({ ...frm, image: url }));
-          window.ui?.toast?.("Photo uploaded", "success");
+        const res = await api.post(url, fd, { headers: {} });
+        const imgUrl = res?.data?.url || res?.data?.data?.url || res?.url || "";
+        if (imgUrl) {
+          setForm((f) => ({ ...f, image: imgUrl }));
+          toast.success("Photo uploaded");
           isSelectingFileRef.current = false;
           setIsSelectingFile(false);
           return;
         }
       } catch (err) {
-        lastErr = err;
-        const msg = err?.data?.message || err?.message || "";
-        if (/Not Found/i.test(msg) || err?.status === 404) continue;
-        setErrors(e => ({ ...e, image: err?.data?.message || err?.message || "Upload failed" }));
-        window.ui?.toast?.(err?.data?.message || err?.message || "Upload failed", "danger");
-        isSelectingFileRef.current = false;
-        setIsSelectingFile(false);
-        return;
+        if (err?.status === 404) continue;
+        else {
+          toast.error(err?.response?.data?.message || "Upload failed");
+          break;
+        }
       }
     }
-    console.error("photo upload failed", lastErr);
     isSelectingFileRef.current = false;
     setIsSelectingFile(false);
   }
 
-  /* --------------------
-     Save (create/update) with validation
-     -------------------- */
+  // ------- Form handlers -------
+  function updateField(field, value) {
+    setForm((f) => ({ ...f, [field]: value }));
+    setErrors((e) => ({ ...e, [field]: undefined }));
+  }
+
   async function handleSave(e) {
     e?.preventDefault?.();
     setSaving(true);
     setErrors({});
+
+    const newErrors = {};
+    if (!form.full_name?.trim()) newErrors.full_name = "Name is required";
+    if (form.email && !/^\S+@\S+\.\S+$/.test(form.email)) newErrors.email = "Valid email required";
+    if (form.contact && !/^[\d+\-\s()]{6,20}$/.test(form.contact)) newErrors.contact = "Enter a valid phone";
+
+    if (Object.keys(newErrors).length) {
+      setErrors(newErrors);
+      setSaving(false);
+      return;
+    }
+
+    const payload = {
+      full_name: form.full_name.trim(),
+      contact: form.contact || null,
+      email: form.email || null,
+      address: form.address || null,
+      dob: form.dob || null,
+      state_id: form.state_id || null,
+      district_id: form.district_id || null,
+      role_id: form.role_id || null,
+      designation_id: form.designation_id || null,
+      department_id: form.department_id || null,
+      image: form.image || null,
+      create_user: form.create_user,
+      username: form.username || undefined,
+      user_email: form.user_email || undefined,
+      sync_user_role: form.sync_user_role,
+    };
+
     try {
-      // validation
-      const newErrors = {};
-      if (!form.full_name || !form.full_name.trim()) newErrors.full_name = "Name is required";
-      if (form.email && !/^\S+@\S+\.\S+$/.test(form.email)) newErrors.email = "Enter a valid email";
-      if (form.contact && !/^[\d+\-\s()]{6,20}$/.test(form.contact)) newErrors.contact = "Enter a valid phone";
-
-      if (Object.keys(newErrors).length) {
-        setErrors(newErrors);
-        setSaving(false);
-        return;
-      }
-
-      // build payload; if image is dataURL we keep as-is so server can accept a base64 or previously uploaded URL
-      const payload = {
-        full_name: form.full_name,
-        contact: form.contact || null,
-        email: form.email || null,
-        address: form.address || null,
-        dob: form.dob || null,
-        state_id: form.state_id || null,
-        district_id: form.district_id || null,
-        role_id: form.role_id || null,
-        designation_id: form.designation_id || null,
-        department_id: form.department_id || null,
-        image: form.image || null,
-        create_user: !!form.create_user,
-        username: form.username || undefined,
-        user_email: form.user_email || undefined,
-        sync_user_role: !!form.sync_user_role
-      };
-
-      // If the image is a File object (we won't be passing File from component here but keep check for possible extension)
-      // For simplicity: send JSON payload; adjust if your backend expects multipart for new photo.
-      if (editing && editing.employee_id) {
-        await api.put(ENDPOINTS.ONE(editing.employee_id), payload);
-        window.ui?.toast?.("Employee updated", "success");
+      if (editing?.employee_id) {
+        await api.put(`/api/employees/${editing.employee_id}`, payload);
+        toast.success("Employee updated");
       } else {
-        await api.post(ENDPOINTS.LIST, payload);
-        window.ui?.toast?.("Employee created", "success");
+        await api.post("/api/employees", payload);
+        toast.success("Employee created");
       }
-
-      // refresh table
-      setTableKey(k => k + 1);
-      setModalOpen(false);
-      setEditing(null);
+      setTableKey((k) => k + 1);
+      closeModal();
     } catch (err) {
-      console.error("save employee", err);
-      const msg = err?.data?.message || err?.message || "Save failed";
-      setErrors(e => ({ ...e, form: msg }));
-      window.ui?.toast?.(msg, "danger");
+      console.error("Save error", err);
+      const msg = err?.response?.data?.message || err?.message || "Save failed";
+      setErrors((e) => ({ ...e, form: msg }));
+      toast.error(msg);
     } finally {
       setSaving(false);
-      isSelectingFileRef.current = false;
-      setIsSelectingFile(false);
     }
   }
 
-  /* --------------------
-     Delete
-     -------------------- */
+  // ------- Delete -------
   async function handleDelete(id) {
-    if (!window.confirm("Delete this staff member? This cannot be undone.")) return;
+    if (!window.confirm("Delete this faculty member?")) return;
     try {
-      await api.del(ENDPOINTS.ONE(id));
-      window.ui?.toast?.("Deleted", "success");
-      setTableKey(k => k + 1);
+      await api.delete(`/api/employees/${id}`);
+      toast.success("Deleted");
+      setTableKey((k) => k + 1);
     } catch (err) {
-      console.error("delete", err);
-      window.ui?.toast?.(err?.data?.message || err?.message || "Delete failed", "danger");
+      console.error("Delete error", err);
+      toast.error(err?.response?.data?.message || "Delete failed");
     }
   }
 
-  /* --------------------
-     Import / export helpers
-     -------------------- */
-  async function handleImportFile(f) {
-    if (!f) return;
+  // ------- Import/Export -------
+  async function handleImport(files) {
+    const file = files?.[0];
+    if (!file) return;
     const fd = new FormData();
-    fd.append("file", f);
+    fd.append("file", file);
     try {
-      await api.post(ENDPOINTS.IMPORT, fd);
-      window.ui?.toast?.("Import started", "success");
-      setTableKey(k => k + 1);
+      await api.post("/api/employees/import-csv", fd);
+      toast.success("Import started");
+      setTableKey((k) => k + 1);
     } catch (err) {
-      console.error("import", err);
-      window.ui?.toast?.(err?.data?.message || err?.message || "Import failed", "danger");
+      toast.error(err?.response?.data?.message || "Import failed");
     } finally {
       if (importRef.current) importRef.current.value = "";
     }
   }
 
-  async function handleExportCsv() {
-    try { await api.download(ENDPOINTS.EXPORT_CSV, { filename: "employees.csv" }); }
-    catch (err) { window.ui?.toast?.(err?.message || "Export failed", "danger"); }
+  async function exportCsv() {
+    try {
+      await api.download("/api/employees/export/csv", { filename: "employees.csv" });
+    } catch (err) {
+      toast.error("Export failed");
+    }
   }
-  async function handleExportXlsx() {
-    try { await api.download(ENDPOINTS.EXPORT_XLSX, { filename: "employees.xlsx" }); }
-    catch (err) { window.ui?.toast?.(err?.message || "Export failed", "danger"); }
+
+  async function exportXlsx() {
+    try {
+      await api.download("/api/employees/export/excel", { filename: "employees.xlsx" });
+    } catch (err) {
+      toast.error("Export failed");
+    }
   }
 
-  /* --------------------
-     Derived filtered district options for selected state
-     -------------------- */
-  const filteredDistricts = districtListForState(districts, stateId);
-
-  return (
-    <main className="max-w-7xl mx-auto px-4 py-8">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-3xl font-bold text-slate-800">Faculty</h1>
-          <div className="text-sm text-slate-500 mt-1">Manage employees & linked users</div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <FileUploadBtn onChange={(e) => handleImportFile(e.target.files && e.target.files[0])} accept=".csv,text/csv">Import CSV</FileUploadBtn>
-          <SecondaryBtn onClick={handleExportCsv}>Export CSV</SecondaryBtn>
-          <SecondaryBtn onClick={handleExportXlsx}>Export Excel</SecondaryBtn>
-          <CreateBtn onClick={openCreate} />
-        </div>
-      </div>
-
-      {/* Filters */}
-      <div className="bg-white border rounded-lg p-4 shadow-sm mb-6">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-          <div className="col-span-2">
-            <label className="block text-sm text-slate-500">Search</label>
-            <div className="mt-1">
-              <TextInput placeholder="Search name / username / email" value={search} onChange={setSearch} clearable />
-            </div>
-          </div>
-
-          <div>
-            <FormField label="State">
-              <Select value={stateId} onChange={(v) => setStateId(v)} options={[{value:"",label:"Any"}].concat(states.map(s => ({ value: s.state_id, label: s.state_name })))} />
-            </FormField>
-          </div>
-
-          <div>
-            <FormField label="District">
-              <Select value={districtId} onChange={(v) => setDistrictId(v)} options={[{value:"",label:"Any"}].concat(filteredDistricts.map(d => ({ value: d.district_id, label: d.district_name })))} />
-            </FormField>
-          </div>
-
-          <div>
-            <FormField label="Role">
-              <Select value={roleId} onChange={(v) => setRoleId(v)} options={[{value:"",label:"Any"}].concat(roles.map(r => ({ value: r.role_id, label: r.role_name })))} />
-            </FormField>
-          </div>
-
-          <div>
-            <FormField label="Designation">
-              <Select value={designationId} onChange={(v) => setDesignationId(v)} options={[{value:"",label:"Any"}].concat(designations.map(d => ({ value: d.designation_id, label: d.designation_name })))} />
-            </FormField>
-          </div>
-
-          <div>
-            <FormField label="Department">
-              <Select value={departmentId} onChange={(v) => setDepartmentId(v)} options={[{value:"",label:"Any"}].concat(departments.map(d => ({ value: d.department_id, label: d.department_name })))} />
-            </FormField>
-          </div>
-
-          <div className="flex items-end gap-2">
-            <PrimaryBtn onClick={() => setTableKey(k => k + 1)}>Apply</PrimaryBtn>
-            <SecondaryBtn onClick={() => {
-              setSearch(""); setStateId(""); setDistrictId(""); setRoleId(""); setDesignationId(""); setDepartmentId(""); setPageSize(DEFAULT_PAGE_SIZE);
-              setTableKey(k => k + 1);
-            }}>Clear</SecondaryBtn>
-          </div>
-        </div>
-      </div>
-
-      {/* Table */}
-      <div className="overflow-x-auto rounded-lg shadow-sm border mb-6">
-        <ServerDataTable
-          key={tableKey}
-          columns={columns}
-          onFetch={onFetch}
-          initialPageSize={pageSize}
-          selectable={false}
+  // ------- Table columns & fetch -------
+  const columns = [
+    {
+      Header: "Photo",
+      accessor: "image",
+      Cell: (r) => (
+        <img
+          src={r.image || DEFAULT_PHOTO}
+          alt={r.full_name}
+          className="h-12 w-12 rounded-lg object-cover border border-slate-200 dark:border-slate-600"
+          onError={(e) => (e.currentTarget.src = DEFAULT_PHOTO)}
         />
-      </div>
-
-      {/* Modal: Create / Edit */}
-      {modalOpen && (
-        <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-4">
-          {/* FIXED: only close when clicking the backdrop element itself (target === currentTarget)
-              This prevents accidental backdrop-close when the file dialog opens. */}
-          <div
-            className="absolute inset-0 bg-black/40"
-            onClick={(e) => {
-              // check ref for immediate value (state may be stale)
-              if (e.target === e.currentTarget && !isSelectingFileRef.current) {
-                closeModal();
-              }
-            }}
+      ),
+    },
+    {
+      Header: "Name",
+      accessor: "full_name",
+      Cell: (r) => (
+        <div>
+          <div className="font-medium text-slate-900 dark:text-white">{r.full_name}</div>
+          {r.username && (
+            <div className="text-sm text-slate-500 dark:text-slate-400">{r.username}</div>
+          )}
+        </div>
+      ),
+    },
+    { Header: "Contact", accessor: "contact" },
+    { Header: "Email", accessor: "email" },
+    { Header: "Role", accessor: "role_name" },
+    { Header: "Designation", accessor: "designation_name" },
+    { Header: "Dept", accessor: "department_name" },
+    {
+      Header: "Location",
+      accessor: "location",
+      Cell: (r) => (
+        <span className="text-sm">
+          {r.state_name || "—"} / {r.district_name || "—"}
+        </span>
+      ),
+    },
+    {
+      Header: "Actions",
+      accessor: "actions",
+      Cell: (r) => (
+        <div className="flex gap-1">
+          <IconBtn icon={ERPIcons.Edit} label="Edit" size="sm" onClick={() => openEdit(r)} />
+          <IconBtn
+            icon={ERPIcons.Delete}
+            label="Delete"
+            size="sm"
+            onClick={() => handleDelete(r.employee_id)}
+            className="hover:bg-rose-50 dark:hover:bg-rose-900/20"
           />
+        </div>
+      ),
+    },
+  ];
 
-          <div className="relative z-10 w-full max-w-3xl bg-white rounded-lg shadow-lg overflow-auto max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-4 py-3 border-b">
-              <div className="flex items-center gap-3">
-                <img src="/images/Ank_Logo.png" alt="logo" className="h-10 w-auto object-contain" />
-                <div>
-                  <div className="text-lg font-semibold">{editing ? "Edit Faculty" : "Add Faculty"}</div>
-                  <div className="text-xs text-slate-400">Create or update faculty record</div>
-                </div>
-              </div>
+  const onFetch = useCallback(
+    async ({ page = 1, pageSize = DEFAULT_PAGE_SIZE, sortBy, sortDir }) => {
+      const params = {
+        page,
+        pageSize,
+        search: search || undefined,
+        state_id: stateId || undefined,
+        district_id: districtId || undefined,
+        role_id: roleId || undefined,
+        designation_id: designationId || undefined,
+        department_id: departmentId || undefined,
+        sortBy: sortBy || undefined,
+        sortDir: sortDir || undefined,
+      };
+      try {
+        const res = await api.get("/api/employees", { params });
+        const rows = res?.data || [];
+        const total = res?.pagination?.total || rows.length || 0;
+        return { data: rows, total };
+      } catch (err) {
+        console.error("Fetch employees error", err);
+        return { data: [], total: 0 };
+      }
+    },
+    [search, stateId, districtId, roleId, designationId, departmentId]
+  );
 
-              <div className="flex items-center gap-2">
-                <button onClick={() => closeModal()} className="text-sm text-slate-500 hover:text-slate-700">Close</button>
-              </div>
+  // -------- Render --------
+  return (
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 p-3 sm:p-5 lg:p-6 transition-colors">
+      <div className="max-w-7xl mx-auto">
+        {/* Page Header */}
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-4 sm:mb-6"
+        >
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div>
+              <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white">
+                Faculty & Staff
+              </h1>
+              <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                Manage employees and linked user accounts
+              </p>
             </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="cursor-pointer">
+                <OutlineBtn>Import CSV</OutlineBtn>
+                <input
+                  ref={importRef}
+                  type="file"
+                  accept=".csv,text/csv"
+                  className="hidden"
+                  onChange={(e) => handleImport(e.target.files)}
+                />
+              </label>
+              <OutlineBtn onClick={exportCsv}>Export CSV</OutlineBtn>
+              <OutlineBtn onClick={exportXlsx}>Export Excel</OutlineBtn>
+              <PrimaryBtn onClick={openCreate} leftIcon={ERPIcons.Plus}>
+                Add Faculty
+              </PrimaryBtn>
+            </div>
+          </div>
+        </motion.div>
 
-            <form onSubmit={handleSave} className="p-4 space-y-4" onClick={(e) => e.stopPropagation()}>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <FormField label="Full name *" required error={errors.full_name}>
-                    <TextInput value={form.full_name} onChange={(v) => setForm(f => ({ ...f, full_name: v }))} clearable />
-                  </FormField>
+        {/* Filters */}
+        <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 sm:p-5 shadow-sm mb-4 sm:mb-6">
+          <div className="flex flex-col sm:flex-row gap-3">
+            <div className="flex-1 relative">
+              <input
+                type="text"
+                placeholder="Search name, email, username..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500"
+              />
+              <ERPIcons.Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 dark:text-slate-500" />
+            </div>
+            <SecondaryBtn onClick={() => setTableKey((k) => k + 1)}>Search</SecondaryBtn>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-3">
+            <FormField label="State">
+              <Select
+                value={stateId}
+                onChange={(v) => setStateId(v)}
+                options={[
+                  { value: "", label: "All States" },
+                  ...states.map((s) => ({ value: s.state_id, label: s.state_name })),
+                ]}
+              />
+            </FormField>
+            <FormField label="District">
+              <Select
+                value={districtId}
+                onChange={(v) => setDistrictId(v)}
+                options={[
+                  { value: "", label: "All Districts" },
+                  ...districts
+                    .filter((d) => !stateId || String(d.state_id) === String(stateId))
+                    .map((d) => ({ value: d.district_id, label: d.district_name })),
+                ]}
+              />
+            </FormField>
+            <FormField label="Role">
+              <Select
+                value={roleId}
+                onChange={(v) => setRoleId(v)}
+                options={[
+                  { value: "", label: "All Roles" },
+                  ...roles.map((r) => ({ value: r.role_id, label: r.role_name })),
+                ]}
+              />
+            </FormField>
+            <FormField label="Designation">
+              <Select
+                value={designationId}
+                onChange={(v) => setDesignationId(v)}
+                options={[
+                  { value: "", label: "All Designations" },
+                  ...designations.map((d) => ({ value: d.designation_id, label: d.designation_name })),
+                ]}
+              />
+            </FormField>
+            <FormField label="Department">
+              <Select
+                value={departmentId}
+                onChange={(v) => setDepartmentId(v)}
+                options={[
+                  { value: "", label: "All Departments" },
+                  ...departments.map((d) => ({ value: d.department_id, label: d.department_name })),
+                ]}
+              />
+            </FormField>
+            <div className="flex items-end gap-2">
+              <PrimaryBtn size="sm" onClick={() => setTableKey((k) => k + 1)}>
+                Apply
+              </PrimaryBtn>
+              <OutlineBtn
+                size="sm"
+                onClick={() => {
+                  setSearch("");
+                  setStateId("");
+                  setDistrictId("");
+                  setRoleId("");
+                  setDesignationId("");
+                  setDepartmentId("");
+                  setTableKey((k) => k + 1);
+                }}
+              >
+                Clear
+              </OutlineBtn>
+            </div>
+          </div>
+        </div>
+
+        {/* Table */}
+        <div className="overflow-x-auto rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
+          <ServerDataTable
+            key={tableKey}
+            columns={columns}
+            onFetch={onFetch}
+            initialPageSize={DEFAULT_PAGE_SIZE}
+            selectable={false}
+          />
+        </div>
+
+        {/* Modal */}
+        <AnimatePresence>
+          {modalOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4">
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+                onClick={closeModal}
+              />
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                transition={{ duration: 0.2 }}
+                className="relative w-full h-full sm:h-auto sm:max-h-[90vh] sm:max-w-3xl bg-white dark:bg-slate-800 shadow-2xl rounded-none sm:rounded-2xl overflow-hidden flex flex-col"
+                role="dialog"
+                aria-modal="true"
+              >
+                {/* Modal header */}
+                <div className="flex items-center gap-3 px-4 sm:px-6 py-4 border-b border-slate-200 dark:border-slate-700 bg-gradient-to-r from-indigo-50 to-blue-50 dark:from-slate-900 dark:to-slate-800">
+                  <img
+                    src={MODAL_HEADER_LOGO}
+                    alt="Logo"
+                    className="h-10 sm:h-12 w-auto rounded"
+                  />
+                  <div>
+                    <h2 className="text-lg sm:text-xl font-semibold text-slate-900 dark:text-white">
+                      {editing ? `Edit Faculty` : "Add Faculty"}
+                    </h2>
+                    <p className="text-sm text-slate-600 dark:text-slate-400">
+                      Fill in employee details and optional user account
+                    </p>
+                  </div>
+                  <IconBtn
+                    icon={ERPIcons.Close}
+                    onClick={closeModal}
+                    className="ml-auto"
+                  />
                 </div>
 
-                <div>
-                  <FormField label="Contact" error={errors.contact}>
-                    <TextInput value={form.contact} onChange={(v) => setForm(f => ({ ...f, contact: v }))} />
-                  </FormField>
-                </div>
+                {/* Scrollable form */}
+                <form
+                  onSubmit={handleSave}
+                  className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-4"
+                >
+                  {errors.form && (
+                    <div className="p-3 rounded-lg bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-sm">
+                      {errors.form}
+                    </div>
+                  )}
 
-                <div>
-                  <FormField label="Email" error={errors.email}>
-                    <TextInput value={form.email} onChange={(v) => setForm(f => ({ ...f, email: v }))} />
-                  </FormField>
-                </div>
-
-                <div>
-                  <FormField label="DOB">
-                    <DateInput value={form.dob} onChange={(v) => setForm(f => ({ ...f, dob: v }))} />
-                  </FormField>
-                </div>
-
-                <div>
-                  <FormField label="State">
-                    <Select value={form.state_id} onChange={(v) => { setForm(f => ({ ...f, state_id: v, district_id: "" })); }} options={[{value:"",label:"Select state"}].concat(states.map(s => ({ value: s.state_id, label: s.state_name })))} />
-                  </FormField>
-                </div>
-
-                <div>
-                  <FormField label="District">
-                    <Select value={form.district_id} onChange={(v) => setForm(f => ({ ...f, district_id: v }))} options={[{value:"",label:"Select district"}].concat(filteredDistricts.map(d => ({ value: d.district_id, label: d.district_name })))} />
-                  </FormField>
-                </div>
-
-                <div>
-                  <FormField label="Role">
-                    <Select value={form.role_id} onChange={(v) => setForm(f => ({ ...f, role_id: v }))} options={[{value:"",label:"Select role"}].concat(roles.map(r => ({ value: r.role_id, label: r.role_name })))} />
-                  </FormField>
-                </div>
-
-                <div>
-                  <FormField label="Designation">
-                    <Select value={form.designation_id} onChange={(v) => setForm(f => ({ ...f, designation_id: v }))} options={[{value:"",label:"Select designation"}].concat(designations.map(d => ({ value: d.designation_id, label: d.designation_name })))} />
-                  </FormField>
-                </div>
-
-                <div>
-                  <FormField label="Department">
-                    <Select value={form.department_id} onChange={(v) => setForm(f => ({ ...f, department_id: v }))} options={[{value:"",label:"Select department"}].concat(departments.map(d => ({ value: d.department_id, label: d.department_name })))} />
-                  </FormField>
-                </div>
-
-                <div className="col-span-2">
-                  <FormField label="Address">
-                    <TextArea value={form.address} onChange={(v) => setForm(f => ({ ...f, address: v }))} />
-                  </FormField>
-                </div>
-
-                {/* photo preview + upload */}
-                <div className="col-span-2 flex items-center gap-4">
-                  <div className="h-28 w-28 overflow-hidden rounded-md bg-white shadow-sm flex-shrink-0">
-                    <img src={form.image || DEFAULT_PHOTO} alt="preview" className="h-full w-full object-cover" onError={(e) => (e.currentTarget.src = DEFAULT_PHOTO)} />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <FormField label="Full Name *" required error={errors.full_name}>
+                      <TextInput
+                        value={form.full_name}
+                        onChange={(v) => updateField("full_name", v)}
+                        placeholder="Full name"
+                      />
+                    </FormField>
+                    <FormField label="Contact" error={errors.contact}>
+                      <TextInput
+                        value={form.contact}
+                        onChange={(v) => updateField("contact", v)}
+                      />
+                    </FormField>
+                    <FormField label="Email" error={errors.email}>
+                      <TextInput
+                        value={form.email}
+                        onChange={(v) => updateField("email", v)}
+                        placeholder="email@company.com"
+                      />
+                    </FormField>
+                    <FormField label="DOB">
+                      <TextInput
+                        type="date"
+                        value={form.dob}
+                        onChange={(v) => updateField("dob", v)}
+                      />
+                    </FormField>
+                    <FormField label="State">
+                      <Select
+                        value={form.state_id}
+                        onChange={(v) => {
+                          updateField("state_id", v);
+                          updateField("district_id", "");
+                        }}
+                        options={[
+                          { value: "", label: "Select state" },
+                          ...states.map((s) => ({
+                            value: s.state_id,
+                            label: s.state_name,
+                          })),
+                        ]}
+                      />
+                    </FormField>
+                    <FormField label="District">
+                      <Select
+                        value={form.district_id}
+                        onChange={(v) => updateField("district_id", v)}
+                        options={[
+                          { value: "", label: "Select district" },
+                          ...districts
+                            .filter(
+                              (d) =>
+                                !form.state_id ||
+                                String(d.state_id) === String(form.state_id)
+                            )
+                            .map((d) => ({
+                              value: d.district_id,
+                              label: d.district_name,
+                            })),
+                        ]}
+                      />
+                    </FormField>
+                    <FormField label="Role">
+                      <Select
+                        value={form.role_id}
+                        onChange={(v) => updateField("role_id", v)}
+                        options={[
+                          { value: "", label: "Select role" },
+                          ...roles.map((r) => ({
+                            value: r.role_id,
+                            label: r.role_name,
+                          })),
+                        ]}
+                      />
+                    </FormField>
+                    <FormField label="Designation">
+                      <Select
+                        value={form.designation_id}
+                        onChange={(v) => updateField("designation_id", v)}
+                        options={[
+                          { value: "", label: "Select designation" },
+                          ...designations.map((d) => ({
+                            value: d.designation_id,
+                            label: d.designation_name,
+                          })),
+                        ]}
+                      />
+                    </FormField>
+                    <FormField label="Department">
+                      <Select
+                        value={form.department_id}
+                        onChange={(v) => updateField("department_id", v)}
+                        options={[
+                          { value: "", label: "Select department" },
+                          ...departments.map((d) => ({
+                            value: d.department_id,
+                            label: d.department_name,
+                          })),
+                        ]}
+                      />
+                    </FormField>
+                    <FormField label="Address" className="sm:col-span-2">
+                      <textarea
+                        value={form.address}
+                        onChange={(e) => updateField("address", e.target.value)}
+                        className="w-full px-3 py-2 text-sm border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white min-h-[80px] resize-y"
+                      />
+                    </FormField>
                   </div>
 
-                  <div className="flex flex-col">
-                    <input
-                      ref={hiddenFileRef}
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onClick={(e) => { e.stopPropagation(); }}
-                      onMouseDown={(e) => { e.stopPropagation(); }}
-                      onFocus={() => {
-                        // user opened file picker via keyboard or clicked input directly
-                        isSelectingFileRef.current = true;
-                        setIsSelectingFile(true);
-                      }}
-                      onChange={(ev) => {
-                        // set ref/state immediately, then handle files
-                        isSelectingFileRef.current = true;
-                        setIsSelectingFile(true);
-                        handlePhotoFiles(ev.target.files);
-                      }}
-                    />
-                    <div className="flex items-center gap-2">
-                      <PrimaryBtn
-                        size="sm"
-                        // set ref and open file picker synchronously on mouse down to avoid backdrop race
-                        onMouseDown={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
+                  {/* Photo upload */}
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                    <div className="h-24 w-24 bg-white dark:bg-slate-700 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-600 flex-shrink-0">
+                      <img
+                        src={form.image || DEFAULT_PHOTO}
+                        alt="Preview"
+                        className="h-full w-full object-cover"
+                        onError={(e) => (e.currentTarget.src = DEFAULT_PHOTO)}
+                      />
+                    </div>
+                    <div>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onClick={(e) => e.stopPropagation()}
+                        onFocus={() => {
                           isSelectingFileRef.current = true;
                           setIsSelectingFile(true);
-                          try {
-                            hiddenFileRef.current && hiddenFileRef.current.click();
-                          } catch (err) {
-                            // some browsers may throw if input not in DOM yet; swallow
-                            console.warn("file input click failed", err);
-                          }
                         }}
-                        // keyboard support: open file picker on Enter/Space
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            isSelectingFileRef.current = true;
-                            setIsSelectingFile(true);
-                            hiddenFileRef.current && hiddenFileRef.current.click();
-                          }
+                        onChange={(e) => {
+                          onFileSelected(e);
                         }}
-                      >
-                        Upload Photo
-                      </PrimaryBtn>
-                      {form.image && (
-                        <button type="button" className="px-3 py-1 rounded-md border" onClick={() => setForm(f => ({ ...f, image: "" }))}>Remove</button>
-                      )}
+                      />
+                      <div className="flex items-center gap-2">
+                        <PrimaryBtn
+                          size="sm"
+                          onClick={triggerFileInput}
+                          disabled={isSelectingFile}
+                        >
+                          Upload Photo
+                        </PrimaryBtn>
+                        {form.image && (
+                          <button
+                            type="button"
+                            onClick={() => updateField("image", "")}
+                            className="px-3 py-1 rounded-md border border-slate-300 dark:border-slate-600 text-sm text-slate-700 dark:text-slate-300"
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                        Max {UPLOAD_MAX_KB}KB – JPG/PNG recommended
+                      </p>
                     </div>
-                    <div className="text-sm text-gray-500 mt-2">Max {Math.round(UPLOAD_MAX_BYTES/1024)}KB. JPG/PNG recommended.</div>
-                    {errors.image && <div className="text-xs text-rose-600 mt-1">{errors.image}</div>}
                   </div>
-                </div>
-              </div>
 
-              <hr />
+                  <hr className="border-slate-200 dark:border-slate-700" />
 
-              <div className="grid grid-cols-2 gap-4 items-center">
-                <div className="flex items-center gap-3">
-                  <ToggleSwitch checked={!!form.create_user} onChange={(v) => setForm(f => ({ ...f, create_user: v }))} />
-                  <div className="text-sm">Create linked user</div>
-                </div>
-
-                <div />
-              </div>
-
-              {form.create_user && (
-                <div className="grid grid-cols-2 gap-4">
-                  <FormField label="Username">
-                    <TextInput value={form.username} onChange={(v) => setForm(f => ({ ...f, username: v }))} />
-                  </FormField>
-
-                  <FormField label="User Email">
-                    <TextInput value={form.user_email} onChange={(v) => setForm(f => ({ ...f, user_email: v }))} />
-                  </FormField>
-
-                  <div className="col-span-2">
-                    <label className="inline-flex items-center gap-2">
-                      <input type="checkbox" className="w-4 h-4" checked={form.sync_user_role} onChange={(e) => setForm(f => ({ ...f, sync_user_role: e.target.checked }))} />
-                      <span className="text-sm">Sync user role with employee role</span>
-                    </label>
+                  {/* User creation */}
+                  <div className="flex items-center gap-3">
+                    <ToggleSwitch
+                      checked={form.create_user}
+                      onChange={(v) => updateField("create_user", v)}
+                    />
+                    <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                      Create linked user account
+                    </span>
                   </div>
-                </div>
-              )}
 
-              {errors.form && <div className="text-sm text-rose-600">{errors.form}</div>}
+                  {form.create_user && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <FormField label="Username">
+                        <TextInput
+                          value={form.username}
+                          onChange={(v) => updateField("username", v)}
+                        />
+                      </FormField>
+                      <FormField label="User Email">
+                        <TextInput
+                          value={form.user_email}
+                          onChange={(v) => updateField("user_email", v)}
+                        />
+                      </FormField>
+                      <div className="sm:col-span-2 flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={form.sync_user_role}
+                          onChange={(e) => updateField("sync_user_role", e.target.checked)}
+                          className="w-4 h-4 rounded"
+                        />
+                        <label className="text-sm text-slate-600 dark:text-slate-300">
+                          Sync user role with employee role
+                        </label>
+                      </div>
+                    </div>
+                  )}
 
-              <div className="flex justify-end gap-3">
-                <CancelBtn onClick={() => closeModal()} />
-                <SaveBtn type="submit" loading={saving} />
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-    </main>
+                  {/* Actions */}
+                  <div className="flex justify-end gap-3 pt-4 border-t border-slate-200 dark:border-slate-700">
+                    <OutlineBtn onClick={closeModal} disabled={saving}>
+                      Cancel
+                    </OutlineBtn>
+                    <PrimaryBtn type="submit" loading={saving}>
+                      {editing ? "Update Faculty" : "Add Faculty"}
+                    </PrimaryBtn>
+                  </div>
+                </form>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+      </div>
+    </div>
   );
-}
-
-/* --------------------
-   small helpers
-   -------------------- */
-function districtListForState(allDistricts, stateId) {
-  if (!stateId) return allDistricts || [];
-  return (allDistricts || []).filter(d => String(d.state_id) === String(stateId));
 }

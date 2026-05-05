@@ -35,7 +35,7 @@ function useOnlineStatus() {
 
 /**
  * Hook: fetch dashboard summary with caching, retry, and refresh logic.
- * Custom headers removed to avoid CORS issues.
+ * No custom headers to avoid CORS issues.
  */
 function useDashboardSummary() {
   const [data, setData] = useState(null);
@@ -72,10 +72,6 @@ function useDashboardSummary() {
     }
   }, []);
 
-  /**
-   * fetchData – stable reference because dependencies are stable.
-   * No 'Cache-Control' header to prevent CORS rejection.
-   */
   const fetchData = useCallback(
     async (skipCache = false) => {
       // Serve fresh cache immediately if available (and not skipping)
@@ -279,20 +275,20 @@ export default function AdminDashboard() {
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className="min-h-screen bg-white p-4 sm:p-6 lg:p-8 flex flex-col"
+      className="min-h-screen bg-white dark:bg-slate-900 p-3 sm:p-4 lg:p-6 flex flex-col"
     >
       <div className="max-w-7xl mx-auto w-full flex-1">
         {/* Header */}
-        <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+        <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 sm:mb-6">
           <div>
-            <h1 className="text-2xl md:text-3xl font-bold text-gray-900">
+            <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 dark:text-white">
               Admin Dashboard
             </h1>
-            <div className="text-sm text-gray-500 mt-1 flex flex-wrap items-center gap-2">
+            <div className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 mt-1 flex flex-wrap items-center gap-2">
               <span>Overview — inquiries, orders, finance & more</span>
               {lastUpdated && (
                 <span
-                  className="inline-flex items-center gap-1 bg-gray-100 rounded-full px-2.5 py-0.5 text-xs font-medium"
+                  className="inline-flex items-center gap-1 bg-gray-100 dark:bg-slate-800 rounded-full px-2 py-0.5 text-xs font-medium text-gray-600 dark:text-gray-300"
                   aria-live="polite"
                 >
                   Updated{" "}
@@ -308,10 +304,10 @@ export default function AdminDashboard() {
           <div className="flex items-center gap-2 flex-wrap">
             {/* Online/Offline badge */}
             <span
-              className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
+              className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                 isOnline
-                  ? "bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-600/20"
-                  : "bg-rose-50 text-rose-700 ring-1 ring-inset ring-rose-600/20"
+                  ? "bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400 ring-1 ring-inset ring-emerald-600/20 dark:ring-emerald-400/30"
+                  : "bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-400 ring-1 ring-inset ring-rose-600/20 dark:ring-rose-400/30"
               }`}
             >
               {isOnline ? "Online" : "Offline"}
@@ -321,7 +317,7 @@ export default function AdminDashboard() {
             <button
               onClick={handleExport}
               disabled={isExporting || !summaryRaw}
-              className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border bg-white shadow-sm hover:bg-gray-50 transition disabled:opacity-50"
+              className="inline-flex items-center gap-2 px-3 py-2 text-xs sm:text-sm font-medium rounded-lg border bg-white dark:bg-slate-800 border-gray-200 dark:border-slate-700 shadow-sm hover:bg-gray-50 dark:hover:bg-slate-700 transition disabled:opacity-50 text-gray-700 dark:text-gray-200"
               aria-label="Export dashboard data"
             >
               <SafeIcon icon="Download" className="w-4 h-4" />
@@ -332,7 +328,7 @@ export default function AdminDashboard() {
             <button
               onClick={refresh}
               disabled={loadingSummary}
-              className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg bg-gray-900 text-white shadow-sm hover:bg-gray-800 transition disabled:opacity-50"
+              className="inline-flex items-center gap-2 px-3 py-2 text-xs sm:text-sm font-medium rounded-lg bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 shadow-sm hover:bg-gray-800 dark:hover:bg-gray-200 transition disabled:opacity-50"
               aria-label="Refresh dashboard data"
             >
               {loadingSummary ? (
@@ -368,7 +364,7 @@ export default function AdminDashboard() {
 
         {/* Tabs – horizontal scrollable on mobile */}
         <nav
-          className="flex overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0 border-b border-gray-200 mb-6 gap-1"
+          className="flex overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0 border-b border-gray-200 dark:border-gray-700 mb-4 sm:mb-6 gap-1"
           aria-label="Dashboard sections"
         >
           {TABS.map((tab) => {
@@ -377,10 +373,10 @@ export default function AdminDashboard() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-2 px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 rounded-t-md ${
+                className={`flex items-center gap-2 px-3 sm:px-4 py-2.5 sm:py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:focus-visible:ring-indigo-400 rounded-t-md ${
                   isActive
-                    ? "border-gray-900 text-gray-900"
-                    : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                    ? "border-gray-900 dark:border-white text-gray-900 dark:text-white"
+                    : "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600"
                 }`}
                 role="tab"
                 aria-selected={isActive}
@@ -407,7 +403,7 @@ export default function AdminDashboard() {
               aria-labelledby="tab-overview"
             >
               {/* KPI Grid */}
-              <div className="mb-8">
+              <div className="mb-6 sm:mb-8">
                 <KPIGrid
                   summary={summaryRaw}
                   onRefresh={refresh}
@@ -417,7 +413,7 @@ export default function AdminDashboard() {
 
               {/* Derived metrics */}
               {performanceMetrics && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 mb-6 sm:mb-8">
                   <StatCard
                     label="Conversion Rate"
                     value={`${performanceMetrics.conversionRate}%`}
@@ -441,9 +437,9 @@ export default function AdminDashboard() {
                 </div>
               )}
 
-              {/* Charts */}
-              <div className="space-y-6">
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Charts – responsive columns */}
+              <div className="space-y-4 sm:space-y-6">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
                   <div className="lg:col-span-2">
                     <OrdersTrendChart days={30} />
                   </div>
@@ -452,7 +448,7 @@ export default function AdminDashboard() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
                   <div className="lg:col-span-2">
                     <PaymentsExpensesChart />
                   </div>
@@ -477,10 +473,10 @@ export default function AdminDashboard() {
               id="panel-analytics"
               role="tabpanel"
               aria-labelledby="tab-analytics"
-              className="bg-white rounded-2xl shadow-sm p-6"
+              className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm p-4 sm:p-6"
             >
-              <h2 className="text-lg font-semibold mb-2">Advanced Analytics</h2>
-              <p className="text-gray-500">
+              <h2 className="text-lg font-semibold mb-2 text-gray-900 dark:text-white">Advanced Analytics</h2>
+              <p className="text-gray-500 dark:text-gray-400">
                 Predictive insights, segmentation, and trend forecasting will appear here.
               </p>
             </motion.section>
@@ -495,10 +491,10 @@ export default function AdminDashboard() {
               id="panel-reports"
               role="tabpanel"
               aria-labelledby="tab-reports"
-              className="bg-white rounded-2xl shadow-sm p-6"
+              className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm p-4 sm:p-6"
             >
-              <h2 className="text-lg font-semibold mb-2">Reports</h2>
-              <p className="text-gray-500">Custom report builder coming soon.</p>
+              <h2 className="text-lg font-semibold mb-2 text-gray-900 dark:text-white">Reports</h2>
+              <p className="text-gray-500 dark:text-gray-400">Custom report builder coming soon.</p>
             </motion.section>
           )}
 
@@ -511,10 +507,10 @@ export default function AdminDashboard() {
               id="panel-settings"
               role="tabpanel"
               aria-labelledby="tab-settings"
-              className="bg-white rounded-2xl shadow-sm p-6"
+              className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm p-4 sm:p-6"
             >
-              <h2 className="text-lg font-semibold mb-2">Dashboard Settings</h2>
-              <p className="text-gray-500">Widget configuration and display options.</p>
+              <h2 className="text-lg font-semibold mb-2 text-gray-900 dark:text-white">Dashboard Settings</h2>
+              <p className="text-gray-500 dark:text-gray-400">Widget configuration and display options.</p>
             </motion.section>
           )}
         </AnimatePresence>
@@ -524,17 +520,17 @@ export default function AdminDashboard() {
           <motion.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            className="mt-6 p-4 rounded-xl border border-rose-200 bg-rose-50"
+            className="mt-4 sm:mt-6 p-3 sm:p-4 rounded-xl border border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-900/20"
             role="alert"
           >
             <div className="flex items-start gap-3">
-              <SafeIcon icon="Warning" className="w-5 h-5 text-rose-500 flex-shrink-0 mt-0.5" />
+              <SafeIcon icon="Warning" className="w-5 h-5 text-rose-500 dark:text-rose-400 flex-shrink-0 mt-0.5" />
               <div className="flex-1 min-w-0">
-                <h3 className="font-medium text-rose-800">Data Load Error</h3>
-                <p className="text-sm text-rose-600 mt-1">{errorSummary}</p>
+                <h3 className="font-medium text-rose-800 dark:text-rose-200">Data Load Error</h3>
+                <p className="text-sm text-rose-600 dark:text-rose-300 mt-1">{errorSummary}</p>
                 <button
                   onClick={refresh}
-                  className="mt-3 text-sm font-medium text-rose-700 underline hover:text-rose-800"
+                  className="mt-3 text-sm font-medium text-rose-700 dark:text-rose-300 underline hover:text-rose-800 dark:hover:text-rose-100"
                 >
                   Retry now
                 </button>
@@ -545,7 +541,7 @@ export default function AdminDashboard() {
 
         {/* Footer with cache info */}
         {lastUpdated && !errorSummary && (
-          <div className="mt-8 pt-6 border-t border-gray-100 text-sm text-gray-500 flex flex-col sm:flex-row justify-between gap-2">
+          <div className="mt-6 sm:mt-8 pt-4 sm:pt-6 border-t border-gray-200 dark:border-gray-700 text-xs sm:text-sm text-gray-500 dark:text-gray-400 flex flex-col sm:flex-row justify-between gap-2">
             <span>
               Data last updated: {lastUpdated.toLocaleDateString()} at{" "}
               {lastUpdated.toLocaleTimeString()}
@@ -553,7 +549,7 @@ export default function AdminDashboard() {
             <div className="flex gap-4">
               <button
                 onClick={clearCache}
-                className="hover:text-gray-900 underline"
+                className="hover:text-gray-900 dark:hover:text-gray-200 underline"
               >
                 Clear cache
               </button>
@@ -563,11 +559,11 @@ export default function AdminDashboard() {
         )}
 
         {/* Quick tip */}
-        <div className="mt-6 p-3 bg-gray-50 rounded-lg text-sm text-gray-600 flex items-start gap-3">
-          <SafeIcon icon="Info" className="w-5 h-5 text-gray-400 flex-shrink-0 mt-0.5" />
+        <div className="mt-4 sm:mt-6 p-3 bg-gray-50 dark:bg-slate-800/80 rounded-lg text-xs sm:text-sm text-gray-600 dark:text-gray-400 flex items-start gap-3">
+          <SafeIcon icon="Info" className="w-4 h-4 sm:w-5 sm:h-5 text-gray-400 dark:text-gray-500 flex-shrink-0 mt-0.5" />
           <span>
-            <strong>Tip:</strong> This dashboard is fully responsive. On mobile, scroll charts
-            horizontally for best viewing. Data is cached for faster loads.
+            <strong>Tip:</strong> This dashboard is fully responsive. On mobile, scroll charts horizontally
+            for best viewing. Data is cached for faster loads.
           </span>
         </div>
       </div>
@@ -575,54 +571,54 @@ export default function AdminDashboard() {
   );
 }
 
-// ==================== Loading Skeleton ====================
+// ==================== Loading Skeleton (Mobile‑first, dark mode) ====================
 
 function LoadingSkeleton() {
   return (
-    <div className="min-h-screen bg-white p-4 sm:p-6 lg:p-8">
+    <div className="min-h-screen bg-white dark:bg-slate-900 p-3 sm:p-4 lg:p-6">
       <div className="max-w-7xl mx-auto animate-pulse">
         {/* Header skeleton */}
-        <div className="flex flex-col sm:flex-row justify-between gap-3 mb-6">
+        <div className="flex flex-col sm:flex-row justify-between gap-3 mb-4 sm:mb-6">
           <div className="space-y-2">
-            <div className="h-7 w-48 bg-gray-200 rounded" />
-            <div className="h-4 w-72 bg-gray-200 rounded" />
+            <div className="h-6 sm:h-7 w-36 sm:w-48 bg-gray-200 dark:bg-gray-700 rounded" />
+            <div className="h-3 sm:h-4 w-56 sm:w-72 bg-gray-200 dark:bg-gray-700 rounded" />
           </div>
           <div className="flex gap-2">
-            <div className="h-9 w-20 bg-gray-200 rounded-lg" />
-            <div className="h-9 w-24 bg-gray-200 rounded-lg" />
+            <div className="h-8 w-16 sm:w-20 bg-gray-200 dark:bg-gray-700 rounded-lg" />
+            <div className="h-8 w-20 sm:w-24 bg-gray-200 dark:bg-gray-700 rounded-lg" />
           </div>
         </div>
 
         {/* Tab skeleton */}
-        <div className="flex gap-1 border-b border-gray-200 mb-6 pb-3 overflow-hidden">
+        <div className="flex gap-1 border-b border-gray-200 dark:border-gray-700 mb-4 sm:mb-6 pb-2 sm:pb-3 overflow-hidden">
           {[1, 2, 3, 4].map((n) => (
-            <div key={n} className="h-8 w-24 bg-gray-200 rounded-t-md" />
+            <div key={n} className="h-8 w-20 sm:w-24 bg-gray-200 dark:bg-gray-700 rounded-t-md" />
           ))}
         </div>
 
-        {/* KPI skeleton cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        {/* KPI skeleton cards – mobile: stack, sm: 2 col, lg: 4 col */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6 sm:mb-8">
           {[1, 2, 3, 4].map((n) => (
             <LoadingCard key={n} variant="detailed" lines={2} />
           ))}
         </div>
 
         {/* Derived metrics skeleton */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 mb-6 sm:mb-8">
           {[1, 2, 3].map((n) => (
-            <div key={n} className="h-20 bg-gray-100 rounded-xl" />
+            <div key={n} className="h-16 sm:h-20 bg-gray-200 dark:bg-gray-700 rounded-xl" />
           ))}
         </div>
 
         {/* Charts skeleton */}
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2 h-64 bg-gray-100 rounded-2xl" />
-            <div className="h-64 bg-gray-100 rounded-2xl" />
+        <div className="space-y-4 sm:space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
+            <div className="lg:col-span-2 h-48 sm:h-64 bg-gray-200 dark:bg-gray-700 rounded-2xl" />
+            <div className="h-48 sm:h-64 bg-gray-200 dark:bg-gray-700 rounded-2xl" />
           </div>
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2 h-64 bg-gray-100 rounded-2xl" />
-            <div className="h-64 bg-gray-100 rounded-2xl" />
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
+            <div className="lg:col-span-2 h-48 sm:h-64 bg-gray-200 dark:bg-gray-700 rounded-2xl" />
+            <div className="h-48 sm:h-64 bg-gray-200 dark:bg-gray-700 rounded-2xl" />
           </div>
         </div>
       </div>
