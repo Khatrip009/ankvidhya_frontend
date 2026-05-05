@@ -6,9 +6,7 @@
   "description": "AnkVidhya frontend (Vite + React)",
   "author": "Khatrip009",
   "license": "ISC",
-
   "homepage": "https://erp.ankvidhya.com/",
-
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -16,7 +14,6 @@
     "deploy": "gh-pages -d dist",
     "clean:gh": "gh-pages-clean"
   },
-
   "dependencies": {
     "@fullcalendar/daygrid": "^6.1.19",
     "@fullcalendar/interaction": "^6.1.19",
@@ -35,7 +32,6 @@
     "react-router-dom": "^7.9.6",
     "recharts": "^3.4.1"
   },
-
   "devDependencies": {
     "@eslint/js": "^9.39.1",
     "@types/react": "^19.2.2",
