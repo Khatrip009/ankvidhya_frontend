@@ -94,10 +94,10 @@ export default function ClassSessionsPage() {
     (async () => {
       try {
         const [sList, stList, dList, eList] = await Promise.all([
-          api.get("/api/schools/schools", { params: { pageSize: 500 } }).then(r => r?.data || []),
-          api.get("/api/master", { params: { table: "standards", pageSize: 500 } }).then(r => r?.data || []),
-          api.get("/api/master", { params: { table: "divisions", pageSize: 500 } }).then(r => r?.data || []),
-          api.get("/api/employees", { params: { pageSize: 500 } }).then(r => r?.data || []),
+          api.get("/api/schools/schools", { query: { pageSize: 500 } }).then(r => r?.data || []),
+          api.get("/api/master", { query: { table: "standards", pageSize: 500 } }).then(r => r?.data || []),
+          api.get("/api/master", { query: { table: "divisions", pageSize: 500 } }).then(r => r?.data || []),
+          api.get("/api/employees", { query: { pageSize: 500 } }).then(r => r?.data || []),
         ]);
         setSchools(sList);
         setStandards(stList);
@@ -130,10 +130,10 @@ export default function ClassSessionsPage() {
   }, [sessions]);
 
   // Fetch sessions
-  async function fetchSessions(params = {}) {
+  async function fetchSessions(query = {}) {
     setLoading(true);
     try {
-      const { data } = await api.get("/api/class-sessions", { params });
+      const { data } = await api.get("/api/class-sessions", { query });
       const rows = (data || []).map(s => ({
         ...s,
         session_date: s.session_date ? String(s.session_date).slice(0, 10) : null,
@@ -206,13 +206,13 @@ export default function ClassSessionsPage() {
 
   /* ------------- Weekday auto‑create ------------- */
   async function fetchTimetableEntriesForWeekday({ weekday, school_id, std_id, div_id, employee_id }) {
-    const params = { pageSize: 2000, day_of_week: weekday };
-    if (school_id) params.school_id = school_id;
-    if (std_id) params.std_id = std_id;
-    if (div_id) params.div_id = div_id;
-    if (employee_id) params.employee_id = employee_id;
+    const query = { pageSize: 2000, day_of_week: weekday };
+    if (school_id) query.school_id = school_id;
+    if (std_id) query.std_id = std_id;
+    if (div_id) query.div_id = div_id;
+    if (employee_id) query.employee_id = employee_id;
     try {
-      const res = await api.get("/api/timetables", { params });
+      const res = await api.get("/api/timetables", { query });
       return res?.data || [];
     } catch (err) {
       console.error("fetch timetable entries", err);
@@ -411,14 +411,14 @@ export default function ClassSessionsPage() {
 
   /* ------------- Filters action ------------- */
   async function handleLoad() {
-    const params = { session_date: date, pageSize: 1000 };
-    if (timetableId) params.timetable_id = timetableId;
-    if (periodNo) params.period_no = Number(periodNo);
-    if (schoolId) params.school_id = Number(schoolId);
-    if (stdId) params.std_id = Number(stdId);
-    if (divId) params.div_id = Number(divId);
-    if (employeeId) params.employee_id = Number(employeeId);
-    await fetchSessions(params);
+    const query = { session_date: date, pageSize: 1000 };
+    if (timetableId) query.timetable_id = timetableId;
+    if (periodNo) query.period_no = Number(periodNo);
+    if (schoolId) query.school_id = Number(schoolId);
+    if (stdId) query.std_id = Number(stdId);
+    if (divId) query.div_id = Number(divId);
+    if (employeeId) query.employee_id = Number(employeeId);
+    await fetchSessions(query);
   }
 
   async function handleCreateFromServer() {

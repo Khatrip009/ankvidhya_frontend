@@ -57,7 +57,7 @@ export default function StrengthsPage() {
   const fetchOrdersList = async () => {
     setLoadingOrderList(true);
     try {
-      const res = await api.get("/api/orders", { params: { page: 1, pageSize: 100 } });
+      const res = await api.get("/api/orders", { query: { page: 1, pageSize: 100 } });
       setOrdersList(res?.data || []);
     } catch (err) {
       console.error("Fetch orders list failed", err);
@@ -75,7 +75,7 @@ export default function StrengthsPage() {
     setError(null);
     try {
       const res = await api.get(`/api/orders/${id}`, {
-        params: { include: "requirements,strengths,items" },
+        query: { include: "requirements,strengths,items" },
       });
       const data = res?.data;
       if (!data) throw new Error("No order data");

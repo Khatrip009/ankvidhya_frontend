@@ -25,8 +25,8 @@ const MODAL_HEADER_LOGO = "/images/Ank_Logo.png";
 const DEFAULT_PAGE_SIZE = 20;
 
 // ---------- Helpers ----------
-async function fetchAll(url, params = {}) {
-  const res = await api.get(url, { params });
+async function fetchAll(url, query = {}) {
+  const res = await api.get(url, { query });
   return res?.data || [];
 }
 
@@ -143,13 +143,13 @@ export default function FacultyAssignmentsPage() {
     async (pg = 1, pgSize = pageSize) => {
       setLoading(true);
       try {
-        const params = { page: pg, pageSize: pgSize };
-        if (search) params.search = search;
-        if (schoolId) params.school_id = schoolId;
-        if (mediumId) params.medium_id = mediumId;
-        if (stdId) params.std_id = stdId;
+        const query = { page: pg, pageSize: pgSize };
+        if (search) query.search = search;
+        if (schoolId) query.school_id = schoolId;
+        if (mediumId) query.medium_id = mediumId;
+        if (stdId) query.std_id = stdId;
 
-        const res = await api.get("/api/faculty-assignments", { params });
+        const res = await api.get("/api/faculty-assignments", { query });
         const rows = res?.data || [];
         const pgInfo = res?.pagination || { page: pg, pageSize: pgSize, total: rows.length };
 
@@ -191,10 +191,10 @@ export default function FacultyAssignmentsPage() {
   // ------- Helpers for employees list -------
   async function loadFacultyEmployees(facultyRoleId, schoolIdSafe) {
     try {
-      const params = { pageSize: 1000 };
-      if (facultyRoleId) params.role_id = facultyRoleId;
-      if (schoolIdSafe) params.school_id = schoolIdSafe;
-      const res = await api.get("/api/employees", { params });
+      const query = { pageSize: 1000 };
+      if (facultyRoleId) query.role_id = facultyRoleId;
+      if (schoolIdSafe) query.school_id = schoolIdSafe;
+      const res = await api.get("/api/employees", { query });
       let emps = res?.data || [];
       if (!facultyRoleId) emps = emps.filter(e => String(e.role_name || "").toLowerCase() === "faculty");
       return emps;

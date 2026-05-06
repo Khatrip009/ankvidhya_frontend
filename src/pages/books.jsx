@@ -83,9 +83,9 @@ export default function BooksPage() {
   const fetchLookupData = async () => {
     try {
       const [cRes, mRes, sRes] = await Promise.all([
-        api.get("/api/courses", { params: { pageSize: 1000 } }),
-        api.get("/api/master", { params: { table: "media", pageSize: 1000 } }),
-        api.get("/api/master", { params: { table: "standards", pageSize: 1000 } }),
+        api.get("/api/courses", { query: { pageSize: 1000 } }),
+        api.get("/api/master", { query: { table: "media", pageSize: 1000 } }),
+        api.get("/api/master", { query: { table: "standards", pageSize: 1000 } }),
       ]);
       setCourses(cRes?.data || []);
       setMediums(mRes?.data || []);
@@ -99,10 +99,10 @@ export default function BooksPage() {
   const fetchBooks = async () => {
     setLoading(true);
     try {
-      const params = { page: pagination.page, pageSize: pagination.pageSize, ...filters };
-      if (debouncedSearch) params.search = debouncedSearch;
+      const query = { page: pagination.page, pageSize: pagination.pageSize, ...filters };
+      if (debouncedSearch) query.search = debouncedSearch;
 
-      const res = await api.get("/api/books", { params });
+      const res = await api.get("/api/books", { query });
       const data = res?.data || [];
       const pg = res?.pagination || {
         page: pagination.page,

@@ -88,9 +88,9 @@ export default function InquiryPage() {
     (async () => {
       try {
         const [medRes, stdRes, empRes] = await Promise.all([
-          api.get("/api/master/lookups", { params: { type: "mediums,standards" } }),
-          api.get("/api/master/lookups", { params: { type: "standards" } }),
-          api.get("/api/employees", { params: { pageSize: 500 } }),
+          api.get("/api/master/lookups", { query: { type: "mediums,standards" } }),
+          api.get("/api/master/lookups", { query: { type: "standards" } }),
+          api.get("/api/employees", { query: { pageSize: 500 } }),
         ]);
         setMediums(medRes?.data?.mediums || medRes?.mediums || []);
         setStandards(stdRes?.data?.standards || stdRes?.standards || []);
@@ -263,7 +263,7 @@ export default function InquiryPage() {
     try {
       // Fetch all data for export (simplified: get a larger page)
       const res = await api.get("/api/leads", {
-        params: { page: 1, pageSize: 10000, search, status, from: fromDate, to: toDate }
+        query: { page: 1, pageSize: 10000, search, status, from: fromDate, to: toDate }
       });
       const rows = res?.data || [];
       const csv = convertToCsv(rows);
@@ -424,7 +424,7 @@ export default function InquiryPage() {
 
   const onFetch = useCallback(async ({ page, pageSize, sortBy, sortDir }) => {
     try {
-      const params = {
+      const query = {
         page,
         pageSize,
         search: search || undefined,
@@ -434,7 +434,7 @@ export default function InquiryPage() {
         sortBy: sortBy || undefined,
         sortDir: sortDir || undefined,
       };
-      const res = await api.get("/api/leads", { params });
+      const res = await api.get("/api/leads", { query });
       const rows = res?.data || [];
       const total = res?.pagination?.total || rows.length || 0;
       return { data: rows, total };

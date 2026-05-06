@@ -105,8 +105,8 @@ export default function SchoolsPage() {
     try {
       const [mRes, sRes, dRes] = await Promise.all([
         api.get("/api/master/mediums"),
-        api.get("/api/master", { params: { table: "states" } }),
-        api.get("/api/master", { params: { table: "districts" } }),
+        api.get("/api/master", { query: { table: "states" } }),
+        api.get("/api/master", { query: { table: "districts" } }),
       ]);
       setMediums(mRes?.data || []);
       setStates(sRes?.data || sRes || []);
@@ -340,12 +340,12 @@ export default function SchoolsPage() {
   const onFetch = useCallback(
     async ({ page = 1, pageSize = DEFAULT_PAGE_SIZE, sortBy, sortDir }) => {
       try {
-        const params = { page, pageSize, search: search || undefined };
+        const query = { page, pageSize, search: search || undefined };
         if (sortBy) {
-          params.sortBy = typeof sortBy === "string" ? sortBy : sortBy.accessor || sortBy;
-          params.sortDir = sortDir || "asc";
+          query.sortBy = typeof sortBy === "string" ? sortBy : sortBy.accessor || sortBy;
+          query.sortDir = sortDir || "asc";
         }
-        const res = await api.get("/api/schools/schools", { params });
+        const res = await api.get("/api/schools/schools", { query });
         const rows = res?.data || [];
         const total = res?.pagination?.total || res?.total || rows.length || 0;
         return { data: rows, total };

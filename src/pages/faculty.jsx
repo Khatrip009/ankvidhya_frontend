@@ -381,7 +381,7 @@ export default function FacultyPage() {
 
   const onFetch = useCallback(
     async ({ page = 1, pageSize = DEFAULT_PAGE_SIZE, sortBy, sortDir }) => {
-      const params = {
+      const query = {
         page,
         pageSize,
         search: search || undefined,
@@ -394,7 +394,7 @@ export default function FacultyPage() {
         sortDir: sortDir || undefined,
       };
       try {
-        const res = await api.get("/api/employees", { params });
+        const res = await api.get("/api/employees", { query });
         const rows = res?.data || [];
         const total = res?.pagination?.total || rows.length || 0;
         return { data: rows, total };

@@ -93,11 +93,11 @@ export default function TimetablesPage() {
     (async () => {
       try {
         const [sRes, mRes, stRes, dRes, eRes] = await Promise.all([
-          api.get("/api/schools/schools", { params: { pageSize: 500 } }),
-          api.get("/api/master", { params: { table: "media", pageSize: 1000 } }),
-          api.get("/api/master", { params: { table: "standards", pageSize: 1000 } }),
-          api.get("/api/master", { params: { table: "divisions", pageSize: 1000 } }),
-          api.get("/api/employees", { params: { pageSize: 500 } }),
+          api.get("/api/schools/schools", { query: { pageSize: 500 } }),
+          api.get("/api/master", { query: { table: "media", pageSize: 1000 } }),
+          api.get("/api/master", { query: { table: "standards", pageSize: 1000 } }),
+          api.get("/api/master", { query: { table: "divisions", pageSize: 1000 } }),
+          api.get("/api/employees", { query: { pageSize: 500 } }),
         ]);
         setSchools(sRes?.data || []);
         setMediums(mRes?.data || []);
@@ -115,7 +115,7 @@ export default function TimetablesPage() {
   const fetchTimetables = useCallback(async (pageNum = 1, ps = pageSize, filter = filters) => {
     setLoading(true);
     try {
-      const params = {
+      const query = {
         page: pageNum,
         pageSize: ps,
         search: filter.search || undefined,
@@ -125,7 +125,7 @@ export default function TimetablesPage() {
         div_id: filter.div_id || undefined,
         employee_id: filter.employee_id || undefined,
       };
-      const res = await api.get("/api/timetables", { params });
+      const res = await api.get("/api/timetables", { query });
       const rows = res?.data || [];
       const pagination = res?.pagination || { page: pageNum, pageSize: ps, total: rows.length };
       setTotal(pagination.total);
@@ -218,7 +218,7 @@ export default function TimetablesPage() {
   // CSV export
   const handleExportCSV = async () => {
     try {
-      const params = new URLSearchParams({
+      const query = new URLSearchquery({
         search: filters.search || '',
         school_id: filters.school_id || '',
         medium_id: filters.medium_id || '',
@@ -226,7 +226,7 @@ export default function TimetablesPage() {
         div_id: filters.div_id || '',
         employee_id: filters.employee_id || '',
       });
-      const url = "/api/timetables/export/csv?" + params.toString();
+      const url = "/api/timetables/export/csv?" + query.toString();
       const res = await fetch(url, { method: "GET", credentials: "include" });
       if (!res.ok) throw new Error("Export failed");
       const blob = await res.blob();

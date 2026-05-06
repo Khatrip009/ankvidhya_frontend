@@ -128,8 +128,8 @@ export default function OrdersPage() {
       } else {
         // try master lookups
         const [mediumsRes, standardsRes] = await Promise.all([
-          api.get("/api/master", { params: { table: "media", pageSize: 1000 } }),
-          api.get("/api/master", { params: { table: "standards", pageSize: 1000 } }),
+          api.get("/api/master", { query: { table: "media", pageSize: 1000 } }),
+          api.get("/api/master", { query: { table: "standards", pageSize: 1000 } }),
         ]);
         setMediums(mediumsRes?.data || []);
         setStandards(standardsRes?.data || []);
@@ -141,7 +141,7 @@ export default function OrdersPage() {
 
     try {
       const leadsRes = await api.get("/api/leads", {
-        params: { status: "converted", page: 1, pageSize: 500 },
+        query: { status: "converted", page: 1, pageSize: 500 },
       });
       const leads = leadsRes?.data || [];
       setConvertedLeads(leads.map(r => ({
@@ -201,7 +201,7 @@ export default function OrdersPage() {
 
   const onFetch = useCallback(
     async ({ page = 1, pageSize = DEFAULT_PAGE_SIZE, sortBy, sortDir }) => {
-      const params = {
+      const query = {
         page,
         pageSize,
         search: search || undefined,
@@ -213,7 +213,7 @@ export default function OrdersPage() {
         sortDir: sortDir || undefined,
       };
       try {
-        const res = await api.get("/api/orders", { params });
+        const res = await api.get("/api/orders", { query });
         const rows = res?.data || [];
         const total = res?.pagination?.total || rows.length || 0;
         return { data: rows, total };
@@ -352,7 +352,7 @@ export default function OrdersPage() {
   // ---------- View / actions ----------
   const openView = async (id) => {
     try {
-      const res = await api.get(`/api/orders/${id}`, { params: { include: "items,strengths,requirements" } });
+      const res = await api.get(`/api/orders/${id}`, { query: { include: "items,strengths,requirements" } });
       if (res?.data) {
         setViewData(res.data);
         setViewOpen(true);
@@ -513,7 +513,7 @@ export default function OrdersPage() {
   const handleExportCsv = async () => {
     try {
       // fetch all for export (simplified)
-      const res = await api.get("/api/orders", { params: { page: 1, pageSize: 10000, search, status, school_id: schoolIdFilter, from: fromDate, to: toDate } });
+      const res = await api.get("/api/orders", { query: { page: 1, pageSize: 10000, search, status, school_id: schoolIdFilter, from: fromDate, to: toDate } });
       const rows = res?.data || [];
       const csv = convertToCsv(rows);
       const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });

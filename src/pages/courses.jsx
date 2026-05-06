@@ -61,9 +61,9 @@ export default function CoursesPage() {
     (async () => {
       try {
         const [mRes, sRes, bRes] = await Promise.all([
-          api.get("/api/master", { params: { table: "media", pageSize: 1000 } }),
-          api.get("/api/master", { params: { table: "standards", pageSize: 1000 } }),
-          api.get("/api/books", { params: { pageSize: 1000 } }),
+          api.get("/api/master", { query: { table: "media", pageSize: 1000 } }),
+          api.get("/api/master", { query: { table: "standards", pageSize: 1000 } }),
+          api.get("/api/books", { query: { pageSize: 1000 } }),
         ]);
         setMediums(mRes?.data || []);
         setStandards(sRes?.data || []);
@@ -83,16 +83,16 @@ export default function CoursesPage() {
   const fetchCourses = useCallback(async () => {
     setLoading(true);
     try {
-      const params = {
+      const query = {
         page: pagination.page,
         pageSize: pagination.pageSize,
       };
-      if (searchQuery) params.search = searchQuery;
-      if (fMedium) params.medium_id = fMedium;
-      if (fStd) params.std_id = fStd;
-      if (fBook) params.book_id = fBook;
+      if (searchQuery) query.search = searchQuery;
+      if (fMedium) query.medium_id = fMedium;
+      if (fStd) query.std_id = fStd;
+      if (fBook) query.book_id = fBook;
 
-      const res = await api.get("/api/courses", { params });
+      const res = await api.get("/api/courses", { query });
       const data = res?.data || [];
       const pg = res?.pagination || { page: pagination.page, pageSize: pagination.pageSize, total: data.length };
       setRows(data);

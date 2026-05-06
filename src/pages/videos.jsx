@@ -30,7 +30,7 @@ const getYouTubeId = (url) => {
   try {
     const u = new URL(url);
     if (u.hostname.includes("youtu.be")) return u.pathname.slice(1);
-    const v = u.searchParams.get("v");
+    const v = u.searchquery.get("v");
     if (v) return v;
     const m = url.match(/embed\/(.+?)(\?|$)/);
     return m ? m[1] : null;
@@ -203,9 +203,9 @@ export default function VideosPage() {
     (async () => {
       try {
         const [cRes, bRes, chRes] = await Promise.all([
-          api.get("/api/courses", { params: { pageSize: 1000 } }),
-          api.get("/api/books", { params: { pageSize: 1000 } }),
-          api.get("/api/chapters", { params: { pageSize: 1000 } }),
+          api.get("/api/courses", { query: { pageSize: 1000 } }),
+          api.get("/api/books", { query: { pageSize: 1000 } }),
+          api.get("/api/chapters", { query: { pageSize: 1000 } }),
         ]);
         setCourses(cRes?.data || []);
         setBooks(bRes?.data || []);
@@ -231,13 +231,13 @@ export default function VideosPage() {
     ) => {
       setLoading(true);
       try {
-        const params = { page, pageSize };
-        if (s) params.search = s;
-        if (course) params.course_id = course;
-        if (book) params.book_id = book;
-        if (chapter) params.chapter_id = chapter;
+        const query = { page, pageSize };
+        if (s) query.search = s;
+        if (course) query.course_id = course;
+        if (book) query.book_id = book;
+        if (chapter) query.chapter_id = chapter;
 
-        const res = await api.get("/api/videos", { params });
+        const res = await api.get("/api/videos", { query });
         let data = res?.data || [];
         const pg = res?.pagination || { page, pageSize, total: data.length };
 
@@ -429,7 +429,7 @@ export default function VideosPage() {
     try {
       const u = new URL(url);
       if (u.hostname.includes("youtu.be")) return `https://www.youtube.com/embed/${u.pathname.slice(1)}`;
-      const id = u.searchParams.get("v");
+      const id = u.searchquery.get("v");
       if (id) return `https://www.youtube.com/embed/${id}`;
       return url.replace("/watch?v=", "/embed/");
     } catch {
