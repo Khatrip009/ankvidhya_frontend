@@ -1,75 +1,57 @@
 // src/hooks/useToast.jsx
-import { createContext, useContext, useState, useCallback } from "react";
+import React, { createContext, useContext, useState, useCallback, useRef } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 
 const ToastContext = createContext(null);
 
-export const ToastProvider = ({ children }) => {
-  const [toasts, setToasts] = useState([]);
+export function useToast() {
+  const ctx = useContext(ToastContext);
+  if (!ctx) throw new Error("useToast must be used within <ToastProvider>");
+  return ctx;
+}
 
-  const removeToast = useCallback((id) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
+export function ToastProvider({ children }) {
+  const [toast, setToast] = useState(null);
+  const timerRef = useRef(null);
+
+  const show = useCallback(({ type, message, duration = 4000 }) => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    setToast({ type, message });
+    timerRef.current = setTimeout(() => {
+      setToast(null);
+      timerRef.current = null;
+    }, duration);
   }, []);
 
-  const showToast = useCallback(
-    ({
-      title = "",
-      description = "",
-      type = "info", // success | error | warning | info
-      duration = 3000,
-    }) => {
-      const id = Date.now();
-
-      setToasts((prev) => [
-        ...prev,
-        { id, title, description, type },
-      ]);
-
-      if (duration > 0) {
-        setTimeout(() => removeToast(id), duration);
-      }
-    },
-    [removeToast]
-  );
+  const success = useCallback((msg) => show({ type: "success", message: msg }), []);
+  const error   = useCallback((msg) => show({ type: "error", message: msg }), []);
+  const warning = useCallback((msg) => show({ type: "warning", message: msg }), []);
 
   return (
-    <ToastContext.Provider value={{ showToast }}>
+    <ToastContext.Provider value={{ success, error, warning }}>
       {children}
-
-      {/* Toast UI */}
-      <div className="fixed top-5 right-5 z-50 space-y-3">
-        {toasts.map((toast) => (
-          <div
-            key={toast.id}
-            className={`min-w-[280px] rounded-lg p-4 shadow-lg text-white
-              ${
-                toast.type === "success"
-                  ? "bg-green-600"
-                  : toast.type === "error"
-                  ? "bg-red-600"
-                  : toast.type === "warning"
-                  ? "bg-yellow-600"
-                  : "bg-blue-600"
-              }`}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            initial={{ opacity: 0, y: -20, x: 20 }}
+            animate={{ opacity: 1, y: 0, x: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className={`fixed top-4 right-4 z-50 px-5 py-3 rounded-lg shadow-lg text-sm font-medium flex items-center gap-3
+              ${toast.type === "success" ? "bg-emerald-50 border border-emerald-200 text-emerald-800 dark:bg-emerald-900/40 dark:border-emerald-800 dark:text-emerald-200" :
+                toast.type === "warning" ? "bg-amber-50 border border-amber-200 text-amber-800 dark:bg-amber-900/40 dark:border-amber-800 dark:text-amber-200" :
+                "bg-rose-50 border border-rose-200 text-rose-800 dark:bg-rose-900/40 dark:border-rose-800 dark:text-rose-200"}
+            `}
+            role="alert"
           >
-            {toast.title && (
-              <div className="font-semibold">{toast.title}</div>
-            )}
-            {toast.description && (
-              <div className="text-sm opacity-90">
-                {toast.description}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
+            <span>{toast.message}</span>
+            <button onClick={() => setToast(null)} className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/10">
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <path d="M6 18L18 6M6 6l12 12" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </ToastContext.Provider>
   );
-};
-
-export const useToast = () => {
-  const context = useContext(ToastContext);
-  if (!context) {
-    throw new Error("useToast must be used inside ToastProvider");
-  }
-  return context;
-};
+}

@@ -1,50 +1,44 @@
-// =====================================================
 // src/lib/api.js
 // Robust fetch wrapper — updated for GitHub Pages + Production backend
-// =====================================================
 
 /* Build query string */
 function qs(obj) {
   obj = obj || {};
-  var params = new URLSearchParams();
-  Object.keys(obj).forEach(function (key) {
-    var val = obj[key];
+  const params = new URLSearchParams();
+  Object.keys(obj).forEach(key => {
+    const val = obj[key];
     if (val === undefined || val === null || val === "") return;
     if (Array.isArray(val)) {
-      val.forEach(function (v) {
-        if (v !== undefined && v !== null) params.append(key, v);
-      });
+      val.forEach(v => { if (v !== undefined && v !== null) params.append(key, v); });
     } else {
       params.append(key, val);
     }
   });
-  var out = params.toString();
+  const out = params.toString();
   return out ? "?" + out : "";
 }
 
 /* Read cookie */
 function readCookie(name) {
   try {
-    var m = document.cookie.match(new RegExp("(?:^|; )" + name + "=([^;]*)"));
+    const m = document.cookie.match(new RegExp("(?:^|; )" + name + "=([^;]*)"));
     return m ? decodeURIComponent(m[1]) : "";
-  } catch (e) {
-    return "";
-  }
+  } catch { return ""; }
 }
 
-/* Token source: window.auth > localStorage > cookie */
+/* Token source */
 function getTokenFresh() {
   try {
-    if (typeof window !== "undefined" && window.auth && typeof window.auth.getToken === "function") {
-      var t = window.auth.getToken();
+    if (typeof window !== "undefined" && window.auth?.getToken) {
+      const t = window.auth.getToken();
       if (t) return t;
     }
-  } catch (e) {}
+  } catch {}
 
   try {
-    var t2 = localStorage.getItem("token");
+    const t2 = localStorage.getItem("token");
     if (t2) return t2;
-  } catch (e) {}
+  } catch {}
 
   return readCookie("token") || "";
 }
@@ -52,147 +46,111 @@ function getTokenFresh() {
 /* Detect JSON */
 function isJsonResponse(resp) {
   try {
-    var ct = (resp.headers && resp.headers.get("content-type")) || "";
-    return ct.indexOf("application/json") !== -1;
-  } catch (e) {
-    return false;
-  }
+    const ct = resp.headers.get("content-type") || "";
+    return ct.includes("application/json");
+  } catch { return false; }
 }
 
-/* =====================================================
-   FIXED: getApiBase()
-   Logic:
-   1) window.CONFIG.API_BASE → manual override
-   2) meta[name="api-base"]
-   3) localhost → http://127.0.0.1:4000
-   4) ANY production host (GitHub Pages) → https://api.ankvidhya.com
-   ===================================================== */
+/* ================== API BASE ================== */
 function getApiBase() {
   try {
-    if (typeof window !== "undefined" && window.CONFIG && window.CONFIG.API_BASE) {
-      return String(window.CONFIG.API_BASE);
-    }
-  } catch (e) {}
+    if (window.CONFIG && window.CONFIG.API_BASE) return String(window.CONFIG.API_BASE);
+  } catch {}
 
   try {
-    if (typeof document !== "undefined") {
-      var meta = document.querySelector('meta[name="api-base"]');
-      if (meta && meta.content) return String(meta.content);
-    }
-  } catch (e) {}
+    const meta = document.querySelector('meta[name="api-base"]');
+    if (meta && meta.content) return String(meta.content);
+  } catch {}
 
   try {
-    if (typeof location !== "undefined" && location.hostname) {
-      var host = location.hostname;
-
-      // Localhost environment
-      if (host === "localhost" || host === "127.0.0.1") {
-        return "http://127.0.0.1:4000";
-      }
-
-      // Production auto-detect
+    if (location.hostname) {
+      const host = location.hostname;
+      if (host === "localhost" || host === "127.0.0.1") return "http://127.0.0.1:4000";
       return "https://api.ankvidhya.com";
     }
-  } catch (e) {}
+  } catch {}
 
-  return "https://api.ankvidhya.com"; // fallback
+  return "https://api.ankvidhya.com";
 }
 
-var warnedOnceNoToken = false;
+let warnedOnceNoToken = false;
 
-/* MAIN REQUEST FUNCTION */
-export async function request(url, options) {
-  options = options || {};
-  var method = options.method || "GET";
-  var body = options.body;
-  var query = options.query;
-  var headers = options.headers || {};
-  var background = !!options.background;
-  var expect = options.expect || "auto";
-  var _retried = options._retried;
+/* ------------------ REQUEST ------------------ */
+export async function request(url, options = {}) {
+  const method   = options.method || "GET";
+  const body     = options.body;
+  const query    = options.query;
+  const headers  = new Headers(options.headers || {});
+  const background = !!options.background;
+  const expect   = options.expect || "auto";
+  const _retried = options._retried;
 
-  var base = getApiBase();
-  var token = getTokenFresh();
-  var headersObj = new Headers(headers || {});
-  var isForm = typeof FormData !== "undefined" && body instanceof FormData;
+  const base  = getApiBase();
+  const token = getTokenFresh();
 
-  if (!isForm && body !== undefined && typeof body !== "string" && !headersObj.has("Content-Type")) {
-    headersObj.set("Content-Type", "application/json");
+  const isForm = typeof FormData !== "undefined" && body instanceof FormData;
+
+  if (!isForm && body !== undefined && typeof body !== "string" && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
   }
-
-  if (!headersObj.has("Accept")) {
-    headersObj.set("Accept", "application/json, text/plain, */*");
+  if (!headers.has("Accept")) {
+    headers.set("Accept", "application/json, text/plain, */*");
   }
 
   if (token) {
-    headersObj.set("Authorization", "Bearer " + token);
-  } else if ((url.indexOf("/api/") === 0 || url.indexOf("http") === 0) && !background && !warnedOnceNoToken) {
-    try { console.warn("[api] No token available. API calls may return 401."); } catch (e) {}
+    headers.set("Authorization", `Bearer ${token}`);
+  } else if ((url.startsWith("/api/") || url.startsWith("http")) && !background && !warnedOnceNoToken) {
+    console.warn("[api] No token available – 401 may occur");
     warnedOnceNoToken = true;
   }
 
-  var fullUrl = url.indexOf("http") === 0 ? url : base + url;
-  var finalUrl = fullUrl + qs(query);
+  const fullUrl = url.startsWith("http") ? url : base + url;
+  const finalUrl = fullUrl + qs(query);
 
-  var response;
-  try {
-    response = await fetch(finalUrl, {
-      method: method,
-      headers: headersObj,
-      body:
-        body === undefined
-          ? undefined
-          : isForm || typeof body === "string"
-          ? body
-          : JSON.stringify(body),
-    });
-  } catch (networkErr) {
-    var errNet = new Error("Network error");
-    errNet.status = 0;
-    errNet.data = { message: "Network error" };
-    throw errNet;
+  // Debug log – only in development (can be removed in production)
+  if (typeof location !== "undefined" && location.hostname === "localhost") {
+    console.debug("[api]", method, finalUrl);
   }
 
-  var looksJson = expect === "json" || (expect === "auto" && isJsonResponse(response));
+  let response;
+  try {
+    response = await fetch(finalUrl, {
+      method,
+      headers,
+      body: isForm ? body : (body !== undefined ? JSON.stringify(body) : undefined),
+    });
+  } catch (networkErr) {
+    const err = new Error("Network error");
+    err.status = 0;
+    err.data = { message: "Network error" };
+    throw err;
+  }
+
+  const looksJson = expect === "json" || (expect === "auto" && isJsonResponse(response));
 
   if (!response.ok) {
     if (response.status === 401 && !_retried) {
-      var fresh = getTokenFresh();
+      const fresh = getTokenFresh();
       if (fresh && fresh !== token) {
-        return request(url, { method, body, query, headers, background, expect, _retried: true });
+        return request(url, { ...options, _retried: true });
       }
     }
 
-    var errPayload = null;
+    let errPayload = null;
     if (looksJson) {
-      try {
-        errPayload = await response.json();
-      } catch (e) {
-        errPayload = { message: "Failed to parse JSON error response" };
-      }
+      try { errPayload = await response.json(); }
+      catch { errPayload = { message: "Failed to parse JSON error" }; }
     } else {
-      try {
-        errPayload = { message: await response.text() };
-      } catch (e) {
-        errPayload = { message: response.statusText || "Unknown error" };
-      }
+      try { errPayload = { message: await response.text() }; }
+      catch { errPayload = { message: response.statusText || "Unknown error" }; }
     }
 
     if (response.status === 401 && !background) {
-      try { if (window.auth?.setToken) window.auth.setToken(""); } catch (e) {}
-      try { localStorage.removeItem("token"); } catch (e) {}
-
-      try {
-        if (typeof window !== "undefined") {
-          var ev = new CustomEvent("auth:expired", {
-            detail: { message: errPayload?.message || "Session expired" }
-          });
-          window.dispatchEvent(ev);
-        }
-      } catch (e) {}
+      try { localStorage.removeItem("token"); } catch {}
+      try { window.dispatchEvent(new CustomEvent("auth:expired", { detail: { message: errPayload?.message || "Session expired" }})); } catch {}
     }
 
-    var err = new Error(errPayload?.message || response.statusText || "HTTP error");
+    const err = new Error(errPayload?.message || response.statusText || "HTTP error");
     err.status = response.status;
     err.data = errPayload;
     throw err;
@@ -201,47 +159,40 @@ export async function request(url, options) {
   if (expect === "blob") return response.blob();
 
   if (looksJson) {
-    try {
-      return await response.json();
-    } catch (e) {
-      return null;
-    }
+    try { return await response.json(); }
+    catch { return null; }
   }
 
-  try {
-    return await response.text();
-  } catch (e) {
-    return null;
-  }
+  try { return await response.text(); }
+  catch { return null; }
 }
 
-/* FILE DOWNLOAD SUPPORT */
-export async function download(url, opts) {
-  opts = opts || {};
-  var blob = await request(url, { method: "GET", query: opts.query, headers: opts.headers, expect: "blob" });
-  var link = document.createElement("a");
-  var href = URL.createObjectURL(blob);
-  link.href = href;
+/* Download wrapper */
+export async function download(url, opts = {}) {
+  const blob = await request(url, { method: "GET", query: opts.query, headers: opts.headers, expect: "blob" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
   link.download = opts.filename || "download";
   document.body.appendChild(link);
   link.click();
-  setTimeout(function () {
-    URL.revokeObjectURL(href);
-    try { link.remove(); } catch (e) {}
-  }, 0);
+  setTimeout(() => URL.revokeObjectURL(link.href), 0);
 }
 
-/* Simple wrappers */
-var get = (url, opts) => request(url, { ...(opts || {}), method: "GET" });
-var post = (url, body, opts) => request(url, { ...(opts || {}), method: "POST", body });
-var put = (url, body, opts) => request(url, { ...(opts || {}), method: "PUT", body });
-var patch = (url, body, opts) => request(url, { ...(opts || {}), method: "PATCH", body });
-var del = (url, opts) => request(url, { ...(opts || {}), method: "DELETE" });
+/* Convenience methods */
+const get   = (url, opts) => request(url, { ...(opts || {}), method: "GET" });
+const post  = (url, body, opts) => request(url, { ...(opts || {}), method: "POST", body });
+const put   = (url, body, opts) => request(url, { ...(opts || {}), method: "PUT", body });
+const patch = (url, body, opts) => request(url, { ...(opts || {}), method: "PATCH", body });
+const del   = (url, opts) => request(url, { ...(opts || {}), method: "DELETE" });
 
-/* MAIN API */
-export var api = {
-  request, download,
-  get, post, put, patch, del,
+export const api = {
+  request,
+  download,
+  get,
+  post,
+  put,
+  patch,
+  del,
 
   background(url, body, opts) {
     return request(url, { ...(opts || {}), method: "POST", body, background: true });
@@ -250,17 +201,17 @@ export var api = {
   leads: {
     lookups: () => get("/api/leads/lookups"),
     list: (params) => get("/api/leads", { query: params }),
-    get: (id) => get("/api/leads/" + id),
-    patch: (id, body) => patch("/api/leads/" + id, body),
-    remove: (id) => del("/api/leads/" + id),
-    convert: (id) => post("/api/leads/" + id + "/convert"),
-    publicSubmit: (body) => post("/api/leads/public", body)
+    get: (id) => get(`/api/leads/${id}`),
+    patch: (id, body) => patch(`/api/leads/${id}`, body),
+    remove: (id) => del(`/api/leads/${id}`),
+    convert: (id) => post(`/api/leads/${id}/convert`),
+    publicSubmit: (body) => post("/api/leads/public", body),
   },
 
   orders: {
     strengths: (orderId, rows) => post(`/api/orders/${orderId}/strengths`, { strengths: rows }),
-    confirm: (orderId) => post(`/api/orders/${orderId}/confirm`)
-  }
+    confirm: (orderId) => post(`/api/orders/${orderId}/confirm`),
+  },
 };
 
 export default api;
