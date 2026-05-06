@@ -1,92 +1,122 @@
 // src/lib/auth.js
-// Thin wrapper stateful auth ported from public/js/auth.js (React-friendly, emits auth:changed)
-
 import api from './api';
 
-const KEY = 'token';
+const TOKEN_KEY = 'token';
+const USER_KEY  = 'user';
+const ROLE_KEY  = 'role';
+const PERMS_KEY = 'permissions';
+
+/* ---------- Internal token cache (sync) ---------- */
 let _token = '';
+try {
+  _token = localStorage.getItem(TOKEN_KEY) || '';
+} catch {
+  _token = '';
+}
 
-try { _token = localStorage.getItem(KEY) || ''; } catch (e) { _token = ''; }
+/* ---------- Public helpers ---------- */
 
-export function getToken() { return _token || (localStorage.getItem(KEY) || '') || ''; }
+export function getToken() {
+  // Return cached token; fallback to localStorage
+  return _token || (() => {
+    try { return localStorage.getItem(TOKEN_KEY) || ''; } catch { return ''; }
+  })();
+}
 
 export function setToken(t) {
   _token = t || '';
   try {
-    if (t) localStorage.setItem(KEY, t);
-    else localStorage.removeItem(KEY);
-  } catch (e) { /* ignore */ }
+    if (t) localStorage.setItem(TOKEN_KEY, t);
+    else localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    // Storage disabled or full – ignore
+  }
 }
 
-/* returns boolean */
-export function isAuthed() { return !!getToken(); }
+export function isAuthed() {
+  return !!getToken();
+}
 
-/* persist session data and notify app (auth:changed) */
+/* ---------- Session persistence ---------- */
 export function setSession(me) {
   if (!me) return;
+
   const roleName = (me.role_name || me.role || '').toString().toLowerCase();
-  try {
-    localStorage.setItem('role', roleName);
-    localStorage.setItem('user', JSON.stringify(me));
-    if (me.permissions) localStorage.setItem('permissions', JSON.stringify(me.permissions));
-    const el = document.getElementById('topProfileName');
-    if (el) el.textContent = me.username || me.employee_name || me.student_name || 'Profile';
-    const perms = JSON.parse(localStorage.getItem('permissions') || '[]');
-    if (window.renderSidebar) window.renderSidebar({ role: roleName || 'faculty', permissions: perms });
-  } catch (e) { /* ignore */ }
 
-  // Notify the app in the same tab that auth changed
+  // Store everything in localStorage
   try {
-    const ev = new CustomEvent('auth:changed', { detail: { user: me } });
-    window.dispatchEvent(ev);
-  } catch (e) { /* ignore */ }
+    localStorage.setItem(ROLE_KEY, roleName);
+    localStorage.setItem(USER_KEY, JSON.stringify(me));
+    if (me.permissions) localStorage.setItem(PERMS_KEY, JSON.stringify(me.permissions));
+  } catch {
+    // Silent – storage not critical here
+  }
+
+  // Notify the entire app that the user has changed
+  try {
+    window.dispatchEvent(
+      new CustomEvent('auth:changed', { detail: { user: me } })
+    );
+  } catch {
+    // Event system may not be available (non‑browser)
+  }
 }
 
-/* helper to extract payload shapes */
-function extract(res) {
-  if (!res) return null;
-  if (res.data) return res.data;
-  return res;
-}
-
+/* ---------- Load current user ---------- */
 export async function loadMe() {
   const token = getToken();
-  if (!token) throw new Error('No token');
+  if (!token) throw new Error('No authentication token found');
 
-  const endpoints = ['/api/auth/me', '/auth/me', '/api/me', '/me'];
+  // Try alternative endpoints (some deployments may use different paths)
+  const endpoints = [
+    '/api/auth/me',
+    '/auth/me',
+    '/api/me',
+    '/me',
+  ];
   let lastErr = null;
+
   for (const ep of endpoints) {
     try {
       const res = await api.get(ep);
-      const data = extract(res);
-      if (data) {
+      const data = res?.data ?? res;   // normalize
+      if (data && data.user_id) {
         setSession(data);
         return data;
       }
-    } catch (e) {
-      lastErr = e;
+    } catch (err) {
+      lastErr = err;
+      // Continue to next endpoint
     }
   }
-  throw lastErr || new Error('Failed to load session');
+
+  // All endpoints failed – clear local session to avoid stale state
+  logout();
+  throw lastErr || new Error('Unable to load user session');
 }
 
-/*
-  logout: clear token & session locally, and notify the app.
-  Do NOT do any location.hash redirect here — React handles navigation.
-*/
+/* ---------- Logout ---------- */
 export function logout() {
-  setToken('');
-  try { localStorage.removeItem('user'); } catch {}
-  try { localStorage.removeItem('role'); } catch {}
-  try { localStorage.removeItem('permissions'); } catch {}
-
-  // notify listeners in same tab that auth changed (session cleared)
+  setToken('');                     // clear token cache + localStorage
   try {
-    const ev = new CustomEvent('auth:changed', { detail: { user: null } });
-    window.dispatchEvent(ev);
-  } catch (e) { /* ignore */ }
+    localStorage.removeItem(USER_KEY);
+    localStorage.removeItem(ROLE_KEY);
+    localStorage.removeItem(PERMS_KEY);
+  } catch {
+    // Silent
+  }
+
+  // Notify that the user is now logged out
+  try {
+    window.dispatchEvent(
+      new CustomEvent('auth:changed', { detail: { user: null } })
+    );
+  } catch {
+    // Silent (non‑browser environment)
+  }
 }
 
+/* ---------- Default export (optional) ---------- */
 export default {
   getToken,
   setToken,

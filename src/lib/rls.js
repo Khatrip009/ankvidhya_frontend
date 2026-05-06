@@ -9,7 +9,7 @@ export async function visibleSchools() {
     const { data } = await api.get('/api/me/schools').catch(() => ({ data: [] }));
     return data || [];
   } else {
-    const { data } = await api.get('/api/schools', { query: { pageSize: 1000 } }).catch(() => ({ data: [] }));
+    const { data } = await api.get('/api/schools/schools', { query: { pageSize: 1000 } }).catch(() => ({ data: [] }));
     return data || [];
   }
 }

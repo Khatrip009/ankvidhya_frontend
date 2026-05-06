@@ -1,13 +1,13 @@
 // src/pages/books.jsx
 import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import api from "../lib/api";
+import api from "../lib/api";                       // ← works with the new api.js
 import ERPIcons from "../components/icons.jsx";
 import { FormField, TextInput, Select, FileInput, SearchInput } from "../components/input.jsx";
 import { SimpleTable, ExportCSV, Pagination } from "../components/table.jsx";
 import { PrimaryBtn, SecondaryBtn, DangerBtn, OutlineBtn, IconBtn } from "../components/buttons.jsx";
 import { Card, CardHeader, CardBody, CardFooter, LoadingCard } from "../components/cards.jsx";
-import { useToast } from "../hooks/useToast.jsx";
+import { useToast } from "../hooks/useToast.jsx";   // ← fixed and working
 import { useDebounce } from "../hooks/useDebounce.jsx";
 
 const defaultImg = "/images/placeholder.png";

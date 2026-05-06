@@ -38,7 +38,7 @@ function pastelColorFromKey(key) {
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
   const sat = 55 + (h % 20);
   const light = 75;
-  return `hsl(${h} ${sat}% ${light}%)`;  // FIXED: ${h} not ${hue: h}
+  return `hsl(${h} ${sat}% ${light}%)`;
 }
 
 function sessionToEvent(s) {
@@ -463,7 +463,7 @@ export default function ClassSessionsPage() {
 
   const { pivot, rowKeys } = buildPivot(sessions);
 
-  // For Tailwind dark mode support of FullCalendar, we insert a style tag
+  // FullCalendar dark mode styles
   const fullCalendarDarkStyles = `
     .dark .fc,
     .dark .fc table,
