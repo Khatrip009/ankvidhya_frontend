@@ -38,7 +38,7 @@ function pastelColorFromKey(key) {
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
   const sat = 55 + (h % 20);
   const light = 75;
-  return `hsl(${hue: h} ${sat}% ${light}%)`;
+  return `hsl(${h} ${sat}% ${light}%)`;  // FIXED: ${h} not ${hue: h}
 }
 
 function sessionToEvent(s) {
