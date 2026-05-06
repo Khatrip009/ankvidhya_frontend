@@ -1,102 +1,95 @@
 // src/pages/faculty_assignments.jsx
 import React, { useEffect, useState, useCallback, useRef } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import api from "../lib/api";
-
 import {
-  CreateBtn,
   PrimaryBtn,
   SecondaryBtn,
-  FileUploadBtn,
-  SaveBtn,
-  CancelBtn,
-  DeleteBtn
+  OutlineBtn,
+  DangerBtn,
+  IconBtn,
 } from "../components/buttons.jsx";
-
 import {
   FormField,
   TextInput,
   TextArea,
   Select,
-  DateInput
+  DateInput,
 } from "../components/input.jsx";
+import { useToast } from "../hooks/useToast.jsx";
+import ERPIcons from "../components/icons.jsx";
+import { LoadingCard } from "../components/cards.jsx";
 
-/**
- * Faculty Assignments — final patched
- * - fixed syntax error
- * - skeleton loading cards
- * - global font + card animations (scoped)
- * - prefetch employee images from /api/employees
- * - grouped school grid inside each faculty card
- */
-
-const DEFAULT_PAGE_SIZE = 20;
 const DEFAULT_PHOTO = "/images/ANK.png";
+const MODAL_HEADER_LOGO = "/images/Ank_Logo.png";
+const DEFAULT_PAGE_SIZE = 20;
 
-/* -------------------------
-   Fetch helpers (fixed routes)
-   ------------------------- */
-async function fetchAll(url, query = {}) {
-  const res = await api.get(url, { query });
+// ---------- Helpers ----------
+async function fetchAll(url, params = {}) {
+  const res = await api.get(url, { params });
   return res?.data || [];
 }
+
 const fetchSchools = () => fetchAll("/api/schools/schools", { pageSize: 1000 });
 const fetchMediums = () => fetchAll("/api/master/media", { pageSize: 1000 });
 const fetchStandards = () => fetchAll("/api/master/standards", { pageSize: 1000 });
 const fetchDivisions = () => fetchAll("/api/master/divisions", { pageSize: 1000 });
 const fetchRoles = () => fetchAll("/api/master/roles", { pageSize: 1000 });
 
-function getSelectedSchoolIdSafe(allowedSchools, chosen) {
-  if (!chosen) return "";
-  return allowedSchools.some(s => String(s.school_id) === String(chosen)) ? chosen : "";
-}
 function fmtDate(d) {
-  if (!d) return "-";
-  try { return String(d).slice(0,10); } catch { return d; }
+  if (!d) return "—";
+  try { return String(d).slice(0, 10); } catch { return String(d); }
 }
 
-// group assignments by school+medium for display inside each card
 function schoolGroupsForCard(assignments = []) {
   const acc = {};
   for (const a of assignments) {
     const key = `${a.school_id || "s-"}|${a.medium_id || "m-"}`;
-    if (!acc[key]) acc[key] = { school_id: a.school_id, school_name: a.school_name, medium_name: a.medium_name, rows: [] };
+    if (!acc[key]) {
+      acc[key] = {
+        school_id: a.school_id,
+        school_name: a.school_name,
+        medium_name: a.medium_name,
+        rows: [],
+      };
+    }
     acc[key].rows.push(a);
   }
   return Object.values(acc);
 }
 
 export default function FacultyAssignmentsPage() {
-  // masters
+  const toast = useToast();
+
+  // Master data
   const [schools, setSchools] = useState([]);
   const [mediums, setMediums] = useState([]);
   const [standards, setStandards] = useState([]);
   const [divisions, setDivisions] = useState([]);
   const [roles, setRoles] = useState([]);
-
-  // employees list (for form & images)
   const [employees, setEmployees] = useState([]);
-  const empImageMapRef = useRef({}); // { employee_id: imageUrl }
+  const empImageMapRef = useRef({});
 
-  // filters
+  // Filter states
   const [search, setSearch] = useState("");
   const [schoolId, setSchoolId] = useState("");
   const [mediumId, setMediumId] = useState("");
   const [stdId, setStdId] = useState("");
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
-  // paging & data
+  // Pagination
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
-  const [grouped, setGrouped] = useState([]); // array of { employee_id, employee_name, username, image, assignments: [...] }
+  const [grouped, setGrouped] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  // modal state
+  // Modal
   const [modalOpen, setModalOpen] = useState(false);
   const [viewOnly, setViewOnly] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(defaultForm());
 
-  // import / bulk
+  // Import / Bulk
   const [importOpen, setImportOpen] = useState(false);
   const [importCsvText, setImportCsvText] = useState("");
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -104,96 +97,104 @@ export default function FacultyAssignmentsPage() {
   const [bulkMode, setBulkMode] = useState("insert");
   const [saving, setSaving] = useState(false);
 
+  // File upload
+  const importFileRef = useRef(null);
+  const [isSelectingFile, setIsSelectingFile] = useState(false);
+
   const facultyRoleIdRef = useRef(null);
 
-  // initial load of masters + employees (and cache employee images)
+  // ------- Initialize masters + employees -------
   useEffect(() => {
     (async () => {
       try {
         const [r, s, m, st, d] = await Promise.all([
-          fetchRoles(), fetchSchools(), fetchMediums(), fetchStandards(), fetchDivisions()
+          fetchRoles(),
+          fetchSchools(),
+          fetchMediums(),
+          fetchStandards(),
+          fetchDivisions(),
         ]);
-        setRoles(r || []); setSchools(s || []); setMediums(m || []); setStandards(st || []); setDivisions(d || []);
-        const facId = (r || []).find(x => String(x.role_name || "").toLowerCase() === "faculty")?.role_id || null;
+        setRoles(r);
+        setSchools(s);
+        setMediums(m);
+        setStandards(st);
+        setDivisions(d);
+
+        const facId = r.find(x => String(x.role_name || "").toLowerCase() === "faculty")?.role_id || null;
         facultyRoleIdRef.current = facId;
 
-        // preload employees (faculty) and build image map
         const emps = await loadFacultyEmployees(facId, "");
-        setEmployees(emps || []);
+        setEmployees(emps);
         const map = {};
-        (emps || []).forEach(e => { if (e && (e.employee_id || e.id)) map[String(e.employee_id || e.id)] = e.image || e.photo || ""; });
+        emps.forEach(e => {
+          if (e?.employee_id || e?.id) map[String(e.employee_id || e.id)] = e.image || e.photo || "";
+        });
         empImageMapRef.current = map;
       } catch (err) {
         console.error("load masters", err);
-        window.ui?.toast?.(err?.message || "Failed to load masters", "danger");
+        toast.error("Failed to load dropdown data");
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // load assignments grouped by employee
-  const loadAssignments = useCallback(async (pg = 1, pgSize = pageSize) => {
-    setLoading(true);
-    try {
-      const query = { page: pg, pageSize: pgSize };
-      if (search) query.search = search;
-      if (schoolId) {
-        const s = (schools || []).find(x => String(x.school_id) === String(schoolId));
-        if (s) query.school_name = s.school_name;
-      }
-      if (mediumId) {
-        const m = (mediums || []).find(x => String(x.medium_id) === String(mediumId));
-        if (m) query.medium_name = m.medium_name;
-      }
-      if (stdId) {
-        const st = (standards || []).find(x => String(x.std_id) === String(stdId));
-        if (st) query.std_name = st.std_name;
-      }
+  // ------- Load assignments grouped by employee -------
+  const loadAssignments = useCallback(
+    async (pg = 1, pgSize = pageSize) => {
+      setLoading(true);
+      try {
+        const params = { page: pg, pageSize: pgSize };
+        if (search) params.search = search;
+        if (schoolId) params.school_id = schoolId;
+        if (mediumId) params.medium_id = mediumId;
+        if (stdId) params.std_id = stdId;
 
-      const res = await api.get("/api/faculty-assignments", { query });
-      const rows = res?.data || [];
-      const pgInfo = res?.pagination || { page: pg, pageSize: pgSize, total: rows.length };
+        const res = await api.get("/api/faculty-assignments", { params });
+        const rows = res?.data || [];
+        const pgInfo = res?.pagination || { page: pg, pageSize: pgSize, total: rows.length };
 
-      // group by employee_id and attach image (from row or from employee map)
-      const map = new Map();
-      for (const r of rows) {
-        const empKey = r.employee_id != null ? String(r.employee_id) : `_u_${r.employee_name || "unknown"}`;
-        if (!map.has(empKey)) {
-          let img = r.image || r.photo || "";
-          if (!img) img = empImageMapRef.current[String(r.employee_id)] || "";
-          map.set(empKey, {
-            employee_id: r.employee_id,
-            employee_name: r.employee_name || r.full_name || "—",
-            username: r.username || r.user_name || r.user || "",
-            image: img || "",
-            assignments: []
-          });
+        const map = new Map();
+        for (const r of rows) {
+          const empKey = r.employee_id != null ? String(r.employee_id) : `_u_${r.employee_name || "unknown"}`;
+          if (!map.has(empKey)) {
+            let img = r.image || r.photo || empImageMapRef.current[String(r.employee_id)] || "";
+            map.set(empKey, {
+              employee_id: r.employee_id,
+              employee_name: r.employee_name || r.full_name || "—",
+              username: r.username || r.user_name || "",
+              image: img || "",
+              assignments: [],
+            });
+          }
+          map.get(empKey).assignments.push(r);
         }
-        map.get(empKey).assignments.push(r);
+
+        setGrouped(Array.from(map.values()));
+        setTotal(pgInfo.total);
+        setPage(pgInfo.page || pg);
+      } catch (err) {
+        console.error("fetch assignments", err);
+        toast.error("Failed to load assignments");
+        setGrouped([]);
+        setTotal(0);
+      } finally {
+        setLoading(false);
       }
+    },
+    [search, schoolId, mediumId, stdId, pageSize, toast]
+  );
 
-      setGrouped(Array.from(map.values()));
-      setTotal(pgInfo.total || 0);
-      setPage(pgInfo.page || pg);
-    } catch (err) {
-      console.error("fetch assignments", err);
-      window.ui?.toast?.(err?.message || "Failed to load assignments", "danger");
-      setGrouped([]);
-      setTotal(0);
-    } finally {
-      setLoading(false);
-    }
-  }, [search, schoolId, mediumId, stdId, schools, mediums, standards, pageSize]);
+  useEffect(() => {
+    loadAssignments(page, pageSize);
+  }, [loadAssignments, page, pageSize]);
 
-  useEffect(() => { loadAssignments(page, pageSize); }, [loadAssignments, page, pageSize]);
-
-  // helper to get a flat employee list (for select)
+  // ------- Helpers for employees list -------
   async function loadFacultyEmployees(facultyRoleId, schoolIdSafe) {
     try {
-      const query = { pageSize: 1000 };
-      if (facultyRoleId) query.role_id = facultyRoleId;
-      if (schoolIdSafe) query.school_id = schoolIdSafe;
-      const res = await api.get("/api/employees", { query });
+      const params = { pageSize: 1000 };
+      if (facultyRoleId) params.role_id = facultyRoleId;
+      if (schoolIdSafe) params.school_id = schoolIdSafe;
+      const res = await api.get("/api/employees", { params });
       let emps = res?.data || [];
       if (!facultyRoleId) emps = emps.filter(e => String(e.role_name || "").toLowerCase() === "faculty");
       return emps;
@@ -203,7 +204,7 @@ export default function FacultyAssignmentsPage() {
     }
   }
 
-  // open modal utilities (same as earlier)
+  // ------- Modal handling -------
   function openForm(mode = "new", row = null) {
     if (mode === "view" && row) {
       setViewOnly(true);
@@ -214,9 +215,9 @@ export default function FacultyAssignmentsPage() {
         medium_id: row.medium_id || "",
         std_ids: row.std_id ? [row.std_id] : [],
         div_ids: row.div_id ? [row.div_id] : [],
-        start_date: row.start_date ? String(row.start_date).slice(0,10) : "",
-        end_date: row.end_date ? String(row.end_date).slice(0,10) : "",
-        notes: row.notes || ""
+        start_date: row.start_date ? String(row.start_date).slice(0, 10) : "",
+        end_date: row.end_date ? String(row.end_date).slice(0, 10) : "",
+        notes: row.notes || "",
       });
       setEditing(row || null);
       setModalOpen(true);
@@ -232,9 +233,9 @@ export default function FacultyAssignmentsPage() {
         medium_id: row.medium_id || "",
         std_ids: row.std_id ? [row.std_id] : [],
         div_ids: row.div_id ? [row.div_id] : [],
-        start_date: row.start_date ? String(row.start_date).slice(0,10) : "",
-        end_date: row.end_date ? String(row.end_date).slice(0,10) : "",
-        notes: row.notes || ""
+        start_date: row.start_date ? String(row.start_date).slice(0, 10) : "",
+        end_date: row.end_date ? String(row.end_date).slice(0, 10) : "",
+        notes: row.notes || "",
       });
       setEditing(row);
       setModalOpen(true);
@@ -248,35 +249,33 @@ export default function FacultyAssignmentsPage() {
     setModalOpen(true);
   }
 
-  // helper toggles
   function toggleSelection(arr, id) {
     const s = String(id);
     if (!Array.isArray(arr)) arr = [];
     if (arr.some(x => String(x) === s)) return arr.filter(x => String(x) !== s);
     return [...arr, id];
   }
+
   function toggleAllStandards(val) {
     if (!Array.isArray(standards)) return;
-    if (val) setForm(f => ({ ...f, std_ids: (standards || []).map(s => s.std_id) }));
+    if (val) setForm(f => ({ ...f, std_ids: standards.map(s => s.std_id) }));
     else setForm(f => ({ ...f, std_ids: [] }));
   }
+
   function toggleAllDivisions(val) {
     if (!Array.isArray(divisions)) return;
-    if (val) setForm(f => ({ ...f, div_ids: (divisions || []).map(d => d.div_id) }));
+    if (val) setForm(f => ({ ...f, div_ids: divisions.map(d => d.div_id) }));
     else setForm(f => ({ ...f, div_ids: [] }));
   }
 
-  // save (multi-combo logic)
+  // ------- Save assignment -------
   async function handleSave(e) {
     e?.preventDefault?.();
     setSaving(true);
     try {
-      if (!form.employee_id) { window.ui?.toast?.("Employee is required", "danger"); setSaving(false); return; }
-      if (!form.school_id) { window.ui?.toast?.("School is required", "danger"); setSaving(false); return; }
-      if (!form.start_date) { window.ui?.toast?.("Start date is required", "danger"); setSaving(false); return; }
-
-      const safeSchool = getSelectedSchoolIdSafe(schools, form.school_id);
-      if (!safeSchool) { window.ui?.toast?.("You do not have access to that school (RLS).", "warning"); setSaving(false); return; }
+      if (!form.employee_id) { toast.error("Employee is required"); setSaving(false); return; }
+      if (!form.school_id) { toast.error("School is required"); setSaving(false); return; }
+      if (!form.start_date) { toast.error("Start date is required"); setSaving(false); return; }
 
       const stds = (Array.isArray(form.std_ids) && form.std_ids.length) ? form.std_ids : [null];
       const divs = (Array.isArray(form.div_ids) && form.div_ids.length) ? form.div_ids : [null];
@@ -292,13 +291,13 @@ export default function FacultyAssignmentsPage() {
         medium_id: form.medium_id ? Number(form.medium_id) : null,
         start_date: form.start_date || null,
         end_date: form.end_date || null,
-        notes: form.notes?.trim() || null
+        notes: form.notes?.trim() || null,
       };
 
       if (form.fa_id && combos.length === 1) {
         const payload = { ...basePayload, std_id: combos[0].std_id, div_id: combos[0].div_id };
         await api.put(`/api/faculty-assignments/${form.fa_id}`, payload);
-        window.ui?.toast?.("Updated", "success");
+        toast.success("Updated");
       } else {
         const tasks = [];
         if (form.fa_id && combos.length >= 1) {
@@ -315,464 +314,616 @@ export default function FacultyAssignmentsPage() {
         const results = await Promise.allSettled(tasks);
         let success = 0, failed = 0;
         results.forEach(r => r.status === "fulfilled" ? success++ : failed++);
-        if (failed === 0) window.ui?.toast?.(`${success} assignment(s) saved`, "success");
-        else window.ui?.toast?.(`${success} saved, ${failed} failed`, "warning");
+        if (failed === 0) toast.success(`${success} assignment(s) saved`);
+        else toast.warning(`${success} saved, ${failed} failed`);
       }
 
       setModalOpen(false);
-      await loadAssignments(1, pageSize);
+      loadAssignments(1, pageSize);
     } catch (err) {
-      if (err?.status === 403) window.ui?.toast?.("Restricted by RLS.", "warning");
-      else window.ui?.toast?.(err?.message || "Save failed", "danger");
       console.error("save assignment", err);
+      if (err?.status === 403) toast.warning("Restricted by RLS.");
+      else toast.error(err?.message || "Save failed");
     } finally {
       setSaving(false);
     }
   }
 
-  // delete a single assignment id
+  // ------- Delete -------
   async function handleDelete(id) {
     if (!window.confirm("Delete this assignment?")) return;
     try {
-      await api.del(`/api/faculty-assignments/${id}`);
-      window.ui?.toast?.("Deleted", "success");
-      await loadAssignments(page, pageSize);
+      await api.delete(`/api/faculty-assignments/${id}`);
+      toast.success("Deleted");
+      loadAssignments(page, pageSize);
     } catch (err) {
-      if (err?.status === 403) window.ui?.toast?.("Restricted by RLS.", "warning");
-      else window.ui?.toast?.(err?.message || "Delete failed", "danger");
+      console.error("delete", err);
+      toast.error(err?.message || "Delete failed");
     }
   }
 
-  // CSV import (file) and bulk handlers
+  // ------- Import / Bulk ----------
   async function handleFileImport(f) {
     if (!f) return;
     const reader = new FileReader();
     reader.onload = async () => {
       try {
         await api.post("/api/faculty-assignments/import-csv", { csv: String(reader.result || "") });
-        window.ui?.toast?.("Import done", "success");
-        await loadAssignments(1, pageSize);
+        toast.success("Import done");
+        loadAssignments(1, pageSize);
       } catch (err) {
-        if (err?.status === 403) window.ui?.toast?.("Restricted by RLS.", "warning");
-        else window.ui?.toast?.(err?.message || "Import failed", "danger");
+        toast.error(err?.message || "Import failed");
       }
     };
     reader.readAsText(f);
+    if (importFileRef.current) importFileRef.current.value = "";
   }
 
   async function handleImportSubmit(e) {
     e?.preventDefault?.();
-    if (!importCsvText || !importCsvText.trim()) { window.ui?.toast?.("Paste CSV first", "danger"); return; }
+    if (!importCsvText?.trim()) { toast.error("Paste CSV content"); return; }
     try {
       await api.post("/api/faculty-assignments/import-csv", { csv: importCsvText });
-      window.ui?.toast?.("Import done", "success");
+      toast.success("Import done");
       setImportOpen(false);
       setImportCsvText("");
-      await loadAssignments(1, pageSize);
+      loadAssignments(1, pageSize);
     } catch (err) {
-      if (err?.status === 403) window.ui?.toast?.("Restricted by RLS.", "warning");
-      else window.ui?.toast?.(err?.message || "Import failed", "danger");
+      toast.error(err?.message || "Import failed");
     }
   }
 
   async function handleBulkSubmit(e) {
     e?.preventDefault?.();
-    if (!bulkJsonText || !bulkJsonText.trim()) { window.ui?.toast?.("Provide JSON array", "danger"); return; }
+    if (!bulkJsonText?.trim()) { toast.error("Provide JSON array"); return; }
     let data;
     try { data = JSON.parse(bulkJsonText); }
-    catch { window.ui?.toast?.("Invalid JSON", "danger"); return; }
-    if (!Array.isArray(data)) { window.ui?.toast?.("JSON must be an array", "danger"); return; }
+    catch { toast.error("Invalid JSON"); return; }
+    if (!Array.isArray(data)) { toast.error("JSON must be an array"); return; }
 
     try {
-      if (bulkMode === "insert") {
-        await api.post("/api/faculty-assignments/bulk-insert", data);
-      } else {
-        await api.post("/api/faculty-assignments/bulk-upsert", data);
-      }
-      window.ui?.toast?.("Bulk operation completed", "success");
+      const url = bulkMode === "insert"
+        ? "/api/faculty-assignments/bulk-insert"
+        : "/api/faculty-assignments/bulk-upsert";
+      await api.post(url, data);
+      toast.success("Bulk operation successful");
       setBulkOpen(false);
       setBulkJsonText("");
-      await loadAssignments(1, pageSize);
+      loadAssignments(1, pageSize);
     } catch (err) {
-      if (err?.status === 403) window.ui?.toast?.("Restricted by RLS.", "warning");
-      else window.ui?.toast?.(err?.message || "Bulk operation failed", "danger");
+      toast.error(err?.message || "Bulk operation failed");
     }
   }
 
-  // pager
+  // ------- Pagination ----------
   const totalPages = Math.max(1, Math.ceil((total || 0) / (pageSize || DEFAULT_PAGE_SIZE)));
-  function goPrev() { if (page > 1) { setPage(p => p - 1); loadAssignments(page - 1, pageSize); } }
-  function goNext() { if (page < totalPages) { setPage(p => p + 1); loadAssignments(page + 1, pageSize); } }
+  function goPrev() { if (page > 1) setPage(p => p - 1); }
+  function goNext() { if (page < totalPages) setPage(p => p + 1); }
 
-  // small skeleton generator
-  function renderSkeletons(count = 6) {
-    return Array.from({ length: count }).map((_, i) => (
-      <div key={`skel-${i}`} className="bg-white border rounded-lg shadow-sm overflow-hidden animate-pulse" style={{ minHeight: 160 }}>
-        <div className="flex items-center gap-3 p-4 border-b">
-          <div className="h-16 w-16 rounded-full bg-slate-200" />
-          <div className="flex-1 min-w-0 space-y-2">
-            <div className="h-4 bg-slate-200 rounded w-3/5" />
-            <div className="h-3 bg-slate-200 rounded w-1/3" />
-          </div>
-        </div>
-        <div className="p-4 space-y-2">
-          <div className="h-10 bg-slate-100 rounded" />
-          <div className="h-10 bg-slate-100 rounded" />
-        </div>
-      </div>
-    ));
-  }
-
+  // ------- Render ----------
   return (
-    <main className="max-w-7xl mx-auto px-4 py-8" style={{ fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial" }}>
-      {/* header + actions */}
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h1 className="text-2xl font-bold">Faculty Assignments</h1>
-          <div className="text-sm text-slate-500">View faculty cards with assigned schools / standards / divisions</div>
-        </div>
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 p-3 sm:p-5 lg:p-6 transition-colors">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-4 sm:mb-6"
+        >
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div>
+              <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white">
+                Faculty Assignments
+              </h1>
+              <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                View faculty cards with assigned schools, standards & divisions
+              </p>
+            </div>
 
-        <div className="flex items-center gap-2">
-          <a className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border" href="/api/faculty-assignments/export/csv" target="_blank" rel="noreferrer">
-            <i className="bi bi-filetype-csv" /> Export CSV
-          </a>
+            <div className="flex flex-wrap items-center gap-2">
+              <a
+                href="/api/faculty-assignments/export/csv"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-2 px-3 py-2 text-xs sm:text-sm font-medium rounded-lg border bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 shadow-sm hover:bg-slate-50 dark:hover:bg-slate-700 transition text-slate-700 dark:text-slate-200"
+              >
+                Export CSV
+              </a>
 
-          <FileUploadBtn accept=".csv,text/csv" onChange={(e) => handleFileImport(e.target.files && e.target.files[0])}>Import CSV</FileUploadBtn>
+              <label className="cursor-pointer">
+                <OutlineBtn
+                  onClick={() => importFileRef.current?.click()}
+                  leftIcon={ERPIcons.Upload}
+                >
+                  Import CSV
+                </OutlineBtn>
+                <input
+                  ref={importFileRef}
+                  type="file"
+                  accept=".csv,text/csv"
+                  className="hidden"
+                  onChange={(e) => handleFileImport(e.target.files?.[0])}
+                />
+              </label>
 
-          <SecondaryBtn onClick={() => { setBulkMode("insert"); setBulkOpen(true); }}>Bulk Insert (JSON)</SecondaryBtn>
-          <SecondaryBtn onClick={() => { setBulkMode("upsert"); setBulkOpen(true); }}>Bulk Upsert (JSON)</SecondaryBtn>
+              <OutlineBtn
+                onClick={() => { setBulkMode("insert"); setBulkOpen(true); }}
+              >
+                Bulk Insert
+              </OutlineBtn>
+              <OutlineBtn
+                onClick={() => { setBulkMode("upsert"); setBulkOpen(true); }}
+              >
+                Bulk Upsert
+              </OutlineBtn>
 
-          <CreateBtn onClick={() => openForm("new")} />
-        </div>
-      </div>
-
-      {/* Filters */}
-      <div className="bg-white border rounded-lg p-4 shadow-sm mb-4">
-        <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
-          <div className="md:col-span-3">
-            <FormField label="Search">
-              <TextInput placeholder="Search employee / notes" value={search} onChange={(v) => { setSearch(v); setPage(1); loadAssignments(1, pageSize); }} />
-            </FormField>
+              <PrimaryBtn
+                size="sm"
+                onClick={() => openForm("new")}
+                leftIcon={ERPIcons.Plus}
+              >
+                New Assignment
+              </PrimaryBtn>
+            </div>
           </div>
+        </motion.div>
 
-          <div>
+        {/* Filters */}
+        <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm p-4 sm:p-5 mb-4 sm:mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
+            <div className="lg:col-span-3">
+              <FormField label="Search">
+                <TextInput
+                  placeholder="Search employee / notes"
+                  value={search}
+                  onChange={(v) => { setSearch(v); setPage(1); loadAssignments(1, pageSize); }}
+                />
+              </FormField>
+            </div>
             <FormField label="School">
-              <Select value={schoolId} onChange={(v) => { setSchoolId(v); setPage(1); loadAssignments(1, pageSize); }} options={[{ value: "", label: "All" }, ...(schools || []).map(s => ({ value: s.school_id, label: s.school_name }))]} />
+              <Select
+                value={schoolId}
+                onChange={(v) => { setSchoolId(v); setPage(1); loadAssignments(1, pageSize); }}
+                options={[
+                  { value: "", label: "All Schools" },
+                  ...schools.map(s => ({ value: s.school_id, label: s.school_name })),
+                ]}
+              />
             </FormField>
-          </div>
-
-          <div>
             <FormField label="Medium">
-              <Select value={mediumId} onChange={(v) => { setMediumId(v); setPage(1); loadAssignments(1, pageSize); }} options={[{ value: "", label: "All" }, ...(mediums || []).map(m => ({ value: m.medium_id, label: m.medium_name }))]} />
+              <Select
+                value={mediumId}
+                onChange={(v) => { setMediumId(v); setPage(1); loadAssignments(1, pageSize); }}
+                options={[
+                  { value: "", label: "All Mediums" },
+                  ...mediums.map(m => ({ value: m.medium_id, label: m.medium_name })),
+                ]}
+              />
             </FormField>
-          </div>
-
-          <div>
             <FormField label="Standard">
-              <Select value={stdId} onChange={(v) => { setStdId(v); setPage(1); loadAssignments(1, pageSize); }} options={[{ value: "", label: "All" }, ...(standards || []).map(s => ({ value: s.std_id, label: s.std_name }))]} />
+              <Select
+                value={stdId}
+                onChange={(v) => { setStdId(v); setPage(1); loadAssignments(1, pageSize); }}
+                options={[
+                  { value: "", label: "All Standards" },
+                  ...standards.map(s => ({ value: s.std_id, label: s.std_name })),
+                ]}
+              />
             </FormField>
-          </div>
-
-          <div>
             <FormField label="Page Size">
-              <Select value={pageSize} onChange={(v) => { setPageSize(Number(v)); setPage(1); loadAssignments(1, Number(v)); }} options={[{ value: 10, label: "10" }, { value: 20, label: "20" }, { value: 50, label: "50" }]} />
+              <Select
+                value={pageSize}
+                onChange={(v) => { setPageSize(Number(v)); setPage(1); loadAssignments(1, Number(v)); }}
+                options={[10, 20, 50].map(n => ({ value: n, label: String(n) }))}
+              />
             </FormField>
           </div>
         </div>
+
+        {/* Cards Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
+          {loading
+            ? Array.from({ length: 6 }).map((_, i) => (
+                <LoadingCard key={i} variant="detailed" lines={4} />
+              ))
+            : grouped.length === 0
+            ? (
+              <div className="col-span-full text-center py-12">
+                <p className="text-slate-500 dark:text-slate-400">No assignments found</p>
+              </div>
+            )
+            : grouped.map(card => (
+                <motion.div
+                  key={card.employee_id || card.employee_name}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.25 }}
+                  className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden hover:shadow-md transition-shadow flex flex-col"
+                >
+                  {/* Card Header */}
+                  <div className="flex items-center gap-4 p-4 border-b border-slate-200 dark:border-slate-700">
+                    <div className="h-14 w-14 rounded-full overflow-hidden bg-slate-100 dark:bg-slate-700 flex-shrink-0 border border-slate-200 dark:border-slate-600">
+                      <img
+                        src={card.image || DEFAULT_PHOTO}
+                        alt={card.employee_name}
+                        className="h-full w-full object-cover"
+                        onError={(e) => (e.currentTarget.src = DEFAULT_PHOTO)}
+                      />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-slate-900 dark:text-white truncate">
+                        {card.employee_name}
+                      </div>
+                      {card.username && (
+                        <div className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                          {card.username}
+                        </div>
+                      )}
+                      <div className="text-sm text-slate-600 dark:text-slate-300 mt-1">
+                        {(card.assignments || []).length} assignment(s)
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Card Body – scrollable school groups */}
+                  <div className="flex-1 p-4 space-y-3 overflow-y-auto max-h-[420px]">
+                    {schoolGroupsForCard(card.assignments || []).map(sg => (
+                      <div
+                        key={`${sg.school_id}_${sg.medium_name || ""}`}
+                        className="border border-slate-200 dark:border-slate-700 rounded-xl p-3 bg-slate-50 dark:bg-slate-800/50"
+                      >
+                        <div className="flex justify-between items-center mb-2">
+                          <div className="font-medium text-slate-900 dark:text-white">
+                            {sg.school_name || "—"}
+                          </div>
+                          {sg.medium_name && (
+                            <span className="text-xs text-slate-500 dark:text-slate-400">
+                              • {sg.medium_name}
+                            </span>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-1 gap-2">
+                          {Object.values(
+                            sg.rows.reduce((acc, r) => {
+                              const key = `${r.std_name || "-"}|${r.division_name || "-"}`;
+                              if (!acc[key]) acc[key] = { std: r.std_name, div: r.division_name, rows: [] };
+                              acc[key].rows.push(r);
+                              return acc;
+                            }, {})
+                          ).map(item => (
+                            <div
+                              key={`${item.std}_${item.div}`}
+                              className="p-2 bg-white dark:bg-slate-700 rounded-lg border border-slate-100 dark:border-slate-600 flex items-center justify-between gap-2"
+                            >
+                              <div className="min-w-0">
+                                <div className="text-sm font-medium text-slate-800 dark:text-slate-200">
+                                  {item.std ? `Std ${item.std}` : "All"} {item.div ? `/ Div ${item.div}` : ""}
+                                </div>
+                                <div className="text-xs text-slate-500 dark:text-slate-400">
+                                  {item.rows.map((r, i) => (
+                                    <span key={i}>
+                                      {fmtDate(r.start_date)} – {r.end_date ? fmtDate(r.end_date) : "Ongoing"}
+                                      {r.notes && <span className="ml-2 opacity-75">📝</span>}
+                                      {i < item.rows.length - 1 ? " • " : ""}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1 flex-shrink-0">
+                                <IconBtn
+                                  icon={ERPIcons.Eye}
+                                  size="xs"
+                                  title="View"
+                                  onClick={() => openForm("view", item.rows[0])}
+                                />
+                                <IconBtn
+                                  icon={ERPIcons.Edit}
+                                  size="xs"
+                                  title="Edit"
+                                  onClick={() => openForm("edit", item.rows[0])}
+                                />
+                                {item.rows[0]?.fa_id && (
+                                  <IconBtn
+                                    icon={ERPIcons.Delete}
+                                    size="xs"
+                                    title="Delete"
+                                    className="hover:text-rose-600 dark:hover:text-rose-400"
+                                    onClick={() => handleDelete(item.rows[0].fa_id)}
+                                  />
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Card Footer */}
+                  <div className="p-3 border-t border-slate-200 dark:border-slate-700 text-xs text-slate-500 dark:text-slate-400 flex justify-between">
+                    <span>{card.assignments?.some(a => a.notes) ? "Notes available" : "No notes"}</span>
+                    <span className={card.assignments?.some(a => a.end_date && new Date(a.end_date) < new Date()) ? "text-rose-500" : "text-emerald-500"}>
+                      {card.assignments?.some(a => a.end_date && new Date(a.end_date) < new Date()) ? "Some ended" : "Active"}
+                    </span>
+                  </div>
+                </motion.div>
+              ))}
+        </div>
+
+        {/* Pagination */}
+        {!loading && grouped.length > 0 && (
+          <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="text-sm text-slate-500 dark:text-slate-400">
+              Page {page} of {totalPages} — {total} result(s)
+            </div>
+            <div className="flex items-center gap-2">
+              <OutlineBtn size="sm" onClick={goPrev} disabled={page <= 1}>Prev</OutlineBtn>
+              <OutlineBtn size="sm" onClick={goNext} disabled={page >= totalPages}>Next</OutlineBtn>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Cards grid - auto adjustable using minmax (wider cards by default) */}
-      <div
-        className="grid gap-4"
-        style={{
-          gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))",
-        }}
-      >
-        {loading && renderSkeletons(6)}
-
-        {!loading && (grouped || []).length === 0 && (
-          <div className="col-span-full p-6 text-center text-slate-500">No assignments found</div>
-        )}
-
-        {!loading && (grouped || []).map(card => (
-          <div
-            key={card.employee_id || card.employee_name}
-            className="bg-white border rounded-lg shadow-sm overflow-hidden transform transition duration-200 hover:-translate-y-1 hover:shadow-lg"
-            style={{ minHeight: 160, display: "flex", flexDirection: "column", animation: "fadeIn .28s ease" }}
-          >
-            <div className="flex items-center gap-3 p-4 border-b">
-              <div className="h-16 w-16 rounded-full bg-white overflow-hidden flex-shrink-0 border">
+      {/* Modal: Create/Edit/View */}
+      <AnimatePresence>
+        {modalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+              onClick={() => setModalOpen(false)}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ duration: 0.2 }}
+              className="relative w-full h-full sm:h-auto sm:max-h-[90vh] sm:max-w-3xl bg-white dark:bg-slate-800 rounded-none sm:rounded-2xl shadow-2xl overflow-hidden flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+            >
+              {/* Modal header */}
+              <div className="flex items-center gap-3 px-4 sm:px-6 py-4 border-b border-slate-200 dark:border-slate-700 bg-gradient-to-r from-indigo-50 to-blue-50 dark:from-slate-900 dark:to-slate-800">
                 <img
-                  src={card.image || DEFAULT_PHOTO}
-                  alt={card.employee_name}
-                  className="h-full w-full object-cover"
-                  onError={(e) => (e.currentTarget.src = DEFAULT_PHOTO)}
+                  src={MODAL_HEADER_LOGO}
+                  alt="Logo"
+                  className="h-10 sm:h-12 w-auto rounded"
+                />
+                <div className="flex-1">
+                  <h2 className="text-lg sm:text-xl font-semibold text-slate-900 dark:text-white">
+                    {viewOnly ? "View Assignment" : form.fa_id ? "Edit Assignment" : "New Assignment"}
+                  </h2>
+                  <p className="text-sm text-slate-600 dark:text-slate-400">
+                    Link faculty to school / medium / standard / division
+                  </p>
+                </div>
+                <IconBtn
+                  icon={ERPIcons.Close}
+                  onClick={() => setModalOpen(false)}
                 />
               </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <div className="font-semibold truncate">{card.employee_name}</div>
-                    <div className="text-xs text-slate-500 truncate">{card.username || ""}</div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-sm font-medium">{(card.assignments || []).length}</div>
-                    <div className="text-xs text-slate-400">assignment(s)</div>
-                  </div>
-                </div>
-              </div>
-            </div>
 
-            <div className="p-3 space-y-3 flex-1 overflow-auto">
-              {/* Group by school inside the card */}
-              {schoolGroupsForCard(card.assignments || []).map(sg => (
-                <div key={`${sg.school_id}_${sg.medium_name || ""}`} className="border rounded p-3 bg-slate-50">
-                  <div className="flex items-center justify-between">
-                    <div className="font-medium">{sg.school_name || "-"}</div>
-                    <div className="text-xs text-slate-500">{sg.medium_name ? <span>• {sg.medium_name}</span> : null}</div>
-                  </div>
-
-                  <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {(() => {
-                      const combos = [];
-                      const seen = new Set();
-                      for (const r of (sg.rows || [])) {
-                        const stdLabel = r.std_name || null;
-                        const divLabel = r.division_name || null;
-                        const key = `${stdLabel || "-"}|${divLabel || "-"}`;
-                        if (!seen.has(key)) {
-                          seen.add(key);
-                          combos.push({ std: stdLabel, div: divLabel, start: r.start_date, end: r.end_date, notes: r.notes, fa_id: r.fa_id, row: r });
-                        }
-                      }
-                      return combos.map(c => (
-                        <div key={`${c.std}_${c.div}_${c.fa_id}`} className="p-2 bg-white border rounded text-sm flex items-center justify-between">
-                          <div>
-                            <div className="text-sm font-medium">
-                              {c.std ? <span>Std <strong className="text-slate-700">{c.std}</strong></span> : <span>-</span>}
-                              {c.div ? <span className="ml-2">Div <strong className="text-slate-700">{c.div}</strong></span> : null}
-                            </div>
-                            <div className="text-xs text-slate-400">Start: {fmtDate(c.start)} • End: {c.end ? fmtDate(c.end) : "-"}</div>
-                            {c.notes && <div className="text-xs text-slate-500 truncate" title={c.notes}>{c.notes}</div>}
-                          </div>
-
-                          <div className="flex-shrink-0 ml-3 flex flex-col items-end gap-2">
-                            <PrimaryBtn size="xs" onClick={() => openForm("view", { fa_id: c.fa_id, ...c.row })}>View</PrimaryBtn>
-                            <SecondaryBtn size="xs" onClick={() => openForm("edit", { fa_id: c.fa_id, ...c.row })}>Edit</SecondaryBtn>
-                            <DeleteBtn size="xs" onClick={() => handleDelete(c.fa_id)} />
-                          </div>
-                        </div>
-                      ));
-                    })()}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="p-3 border-t flex items-center justify-between text-xs text-slate-500">
-              <div>{(card.assignments || []).some(a => a.notes) ? "Notes available" : "No notes"}</div>
-              <div>{(card.assignments || []).some(a => a.end_date && new Date(a.end_date) < new Date()) ? <span className="text-rose-600">Some ended</span> : <span>Active</span>}</div>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Pager */}
-      <div className="mt-6 flex items-center justify-between">
-        <div className="text-sm text-slate-500">Showing page {page} of {totalPages} — {total} result(s)</div>
-        <div className="flex items-center gap-2">
-          <button className="px-3 py-1 rounded border disabled:opacity-50" onClick={goPrev} disabled={page<=1}>Prev</button>
-          <button className="px-3 py-1 rounded border disabled:opacity-50" onClick={goNext} disabled={page>=totalPages}>Next</button>
-        </div>
-      </div>
-
-      {/* Modal: Create / Edit / View (multi-std/div UI) */}
-      {modalOpen && (
-        <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setModalOpen(false)} />
-          <div className="relative z-10 w-full max-w-3xl bg-white rounded-lg shadow-lg overflow-auto max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-4 py-3 border-b">
-              <div className="flex items-center gap-3">
-                <img src="/images/Ank_Logo.png" alt="logo" className="h-10 w-auto object-contain" />
-                <div>
-                  <div className="text-lg font-semibold">{viewOnly ? `View • ${form.employee_id ? "" : ""}` : (form.fa_id ? "Edit Assignment" : "New Assignment")}</div>
-                  <div className="text-xs text-slate-400">Link faculty to school / medium / standard / division</div>
-                </div>
-              </div>
-              <div>
-                <button className="text-sm text-slate-500 hover:text-slate-700" onClick={() => setModalOpen(false)}>Close</button>
-              </div>
-            </div>
-
-            <form onSubmit={handleSave} className="p-4 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <FormField label="Employee *">
-                  <Select value={form.employee_id} onChange={(v) => setForm(f => ({ ...f, employee_id: v }))} options={[{ value: "", label: "Select" }, ...(employees || []).map(e => ({ value: e.employee_id, label: e.full_name || e.employee_name || e.username }))]} />
-                </FormField>
-
-                <FormField label="School *">
-                  <Select value={form.school_id} onChange={(v) => setForm(f => ({ ...f, school_id: v }))} options={[{ value: "", label: "Select" }, ...(schools || []).map(s => ({ value: s.school_id, label: s.school_name }))]} />
-                </FormField>
-
-                <FormField label="Medium">
-                  <Select value={form.medium_id} onChange={(v) => setForm(f => ({ ...f, medium_id: v }))} options={[{ value: "", label: "Select" }, ...(mediums || []).map(m => ({ value: m.medium_id, label: m.medium_name }))]} />
-                </FormField>
-
-                {/* MULTI-STANDARDS */}
-                <div className="col-span-2">
-                  <div className="flex items-center justify-between mb-2">
-                    <label className="form-label">Standards (multi-select)</label>
-                    <div className="text-xs text-slate-500">
-                      <label className="inline-flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={Array.isArray(form.std_ids) && Array.isArray(standards) && form.std_ids.length === standards.length && standards.length>0}
-                          onChange={(e) => toggleAllStandards(e.target.checked)}
-                        />
-                        <span>Select all</span>
-                      </label>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 max-h-40 overflow-auto border rounded p-2 bg-slate-50">
-                    {(standards || []).length === 0 ? (
-                      <div className="text-sm text-slate-400 col-span-2">No standards</div>
-                    ) : (standards || []).map(s => {
-                      const checked = Array.isArray(form.std_ids) && form.std_ids.some(x => String(x) === String(s.std_id));
-                      return (
-                        <label key={s.std_id} className="inline-flex items-center gap-2 text-sm">
-                          <input type="checkbox" checked={checked} disabled={viewOnly} onChange={() => setForm(f => ({ ...f, std_ids: toggleSelection(f.std_ids, s.std_id) }))} />
-                          <span>{s.std_name}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* MULTI-DIVISIONS */}
-                <div className="col-span-2">
-                  <div className="flex items-center justify-between mb-2">
-                    <label className="form-label">Divisions (multi-select)</label>
-                    <div className="text-xs text-slate-500">
-                      <label className="inline-flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={Array.isArray(form.div_ids) && Array.isArray(divisions) && form.div_ids.length === divisions.length && divisions.length>0}
-                          onChange={(e) => toggleAllDivisions(e.target.checked)}
-                        />
-                        <span>Select all</span>
-                      </label>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 max-h-40 overflow-auto border rounded p-2 bg-slate-50">
-                    {(divisions || []).length === 0 ? (
-                      <div className="text-sm text-slate-400 col-span-2">No divisions</div>
-                    ) : (divisions || []).map(d => {
-                      const checked = Array.isArray(form.div_ids) && form.div_ids.some(x => String(x) === String(d.div_id));
-                      return (
-                        <label key={d.div_id} className="inline-flex items-center gap-2 text-sm">
-                          <input type="checkbox" checked={checked} disabled={viewOnly} onChange={() => setForm(f => ({ ...f, div_ids: toggleSelection(f.div_ids, d.div_id) }))} />
-                          <span>{d.division_name}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <FormField label="Start Date *">
-                  <DateInput value={form.start_date} onChange={(v) => setForm(f => ({ ...f, start_date: v }))} />
-                </FormField>
-
-                <FormField label="End Date">
-                  <DateInput value={form.end_date} onChange={(v) => setForm(f => ({ ...f, end_date: v }))} />
-                </FormField>
-
-                <div className="col-span-2">
-                  <FormField label="Notes">
-                    <TextArea value={form.notes} onChange={(v) => setForm(f => ({ ...f, notes: v }))} />
+              {/* Scrollable form */}
+              <form onSubmit={handleSave} className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <FormField label="Employee *" required>
+                    <Select
+                      disabled={viewOnly}
+                      value={form.employee_id}
+                      onChange={(v) => setForm(f => ({ ...f, employee_id: v }))}
+                      options={[
+                        { value: "", label: "Select Employee" },
+                        ...employees.map(e => ({ value: e.employee_id, label: e.full_name || e.employee_name || e.username })),
+                      ]}
+                    />
                   </FormField>
+                  <FormField label="School *" required>
+                    <Select
+                      disabled={viewOnly}
+                      value={form.school_id}
+                      onChange={(v) => setForm(f => ({ ...f, school_id: v }))}
+                      options={[
+                        { value: "", label: "Select School" },
+                        ...schools.map(s => ({ value: s.school_id, label: s.school_name })),
+                      ]}
+                    />
+                  </FormField>
+                  <FormField label="Medium">
+                    <Select
+                      disabled={viewOnly}
+                      value={form.medium_id}
+                      onChange={(v) => setForm(f => ({ ...f, medium_id: v }))}
+                      options={[
+                        { value: "", label: "None" },
+                        ...mediums.map(m => ({ value: m.medium_id, label: m.medium_name })),
+                      ]}
+                    />
+                  </FormField>
+
+                  <div className="sm:col-span-2">
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                        Standards (multi-select)
+                      </label>
+                      <label className="inline-flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                        <input
+                          type="checkbox"
+                          disabled={viewOnly}
+                          checked={Array.isArray(form.std_ids) && standards.length > 0 && form.std_ids.length === standards.length}
+                          onChange={(e) => toggleAllStandards(e.target.checked)}
+                          className="rounded"
+                        />
+                        Select all
+                      </label>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-32 overflow-y-auto border border-slate-200 dark:border-slate-600 rounded-lg p-2 bg-white dark:bg-slate-700">
+                      {standards.map(s => (
+                        <label key={s.std_id} className="inline-flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            disabled={viewOnly}
+                            checked={Array.isArray(form.std_ids) && form.std_ids.some(x => String(x) === String(s.std_id))}
+                            onChange={() => setForm(f => ({ ...f, std_ids: toggleSelection(f.std_ids, s.std_id) }))}
+                            className="rounded"
+                          />
+                          {s.std_name}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                        Divisions (multi-select)
+                      </label>
+                      <label className="inline-flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                        <input
+                          type="checkbox"
+                          disabled={viewOnly}
+                          checked={Array.isArray(form.div_ids) && divisions.length > 0 && form.div_ids.length === divisions.length}
+                          onChange={(e) => toggleAllDivisions(e.target.checked)}
+                          className="rounded"
+                        />
+                        Select all
+                      </label>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-32 overflow-y-auto border border-slate-200 dark:border-slate-600 rounded-lg p-2 bg-white dark:bg-slate-700">
+                      {divisions.map(d => (
+                        <label key={d.div_id} className="inline-flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            disabled={viewOnly}
+                            checked={Array.isArray(form.div_ids) && form.div_ids.some(x => String(x) === String(d.div_id))}
+                            onChange={() => setForm(f => ({ ...f, div_ids: toggleSelection(f.div_ids, d.div_id) }))}
+                            className="rounded"
+                          />
+                          {d.division_name}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  <FormField label="Start Date *" required>
+                    <DateInput
+                      disabled={viewOnly}
+                      value={form.start_date}
+                      onChange={(v) => setForm(f => ({ ...f, start_date: v }))}
+                    />
+                  </FormField>
+                  <FormField label="End Date">
+                    <DateInput
+                      disabled={viewOnly}
+                      value={form.end_date}
+                      onChange={(v) => setForm(f => ({ ...f, end_date: v }))}
+                    />
+                  </FormField>
+
+                  <div className="sm:col-span-2">
+                    <FormField label="Notes">
+                      <TextArea
+                        disabled={viewOnly}
+                        value={form.notes}
+                        onChange={(v) => setForm(f => ({ ...f, notes: v }))}
+                      />
+                    </FormField>
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-3 pt-4 border-t border-slate-200 dark:border-slate-700">
+                  <OutlineBtn onClick={() => setModalOpen(false)}>Cancel</OutlineBtn>
+                  {!viewOnly && (
+                    <PrimaryBtn type="submit" loading={saving}>
+                      {form.fa_id ? "Update" : "Create"}
+                    </PrimaryBtn>
+                  )}
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Import CSV Modal */}
+      <AnimatePresence>
+        {importOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+              onClick={() => setImportOpen(false)}
+            />
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="relative w-full max-w-2xl bg-white dark:bg-slate-800 rounded-2xl shadow-2xl overflow-hidden"
+            >
+              <div className="p-4 sm:p-6">
+                <h2 className="text-lg font-semibold mb-4 text-slate-900 dark:text-white">Import CSV</h2>
+                <FormField label="Paste CSV content">
+                  <TextArea
+                    value={importCsvText}
+                    onChange={setImportCsvText}
+                    rows={8}
+                  />
+                </FormField>
+                <div className="flex justify-end gap-3 mt-6">
+                  <OutlineBtn onClick={() => setImportOpen(false)}>Cancel</OutlineBtn>
+                  <PrimaryBtn onClick={handleImportSubmit}>Import</PrimaryBtn>
                 </div>
               </div>
-
-              <div className="flex justify-end gap-3">
-                <CancelBtn onClick={() => setModalOpen(false)} />
-                {!viewOnly && <SaveBtn loading={saving} />}
-              </div>
-            </form>
+            </motion.div>
           </div>
-        </div>
-      )}
+        )}
+      </AnimatePresence>
 
-      {/* Import CSV modal */}
-      {importOpen && (
-        <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setImportOpen(false)} />
-          <div className="relative z-10 w-full max-w-3xl bg-white rounded-lg shadow-lg overflow-auto max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-4 py-3 border-b">
-              <div>
-                <div className="text-lg font-semibold">Import Faculty Assignments (CSV)</div>
-                <div className="text-xs text-slate-400">Headers: employee_name, school_name, medium_name, std_name, division_name, start_date, end_date, notes</div>
+      {/* Bulk JSON Modal */}
+      <AnimatePresence>
+        {bulkOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+              onClick={() => setBulkOpen(false)}
+            />
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="relative w-full max-w-2xl bg-white dark:bg-slate-800 rounded-2xl shadow-2xl overflow-hidden"
+            >
+              <div className="p-4 sm:p-6">
+                <h2 className="text-lg font-semibold mb-4 text-slate-900 dark:text-white">
+                  {bulkMode === "insert" ? "Bulk Insert" : "Bulk Upsert"} (JSON)
+                </h2>
+                <FormField label="JSON array">
+                  <TextArea
+                    value={bulkJsonText}
+                    onChange={setBulkJsonText}
+                    rows={8}
+                  />
+                </FormField>
+                <div className="flex justify-end gap-3 mt-6">
+                  <OutlineBtn onClick={() => setBulkOpen(false)}>Cancel</OutlineBtn>
+                  <PrimaryBtn onClick={handleBulkSubmit}>Run</PrimaryBtn>
+                </div>
               </div>
-              <div>
-                <button className="text-sm text-slate-500 hover:text-slate-700" onClick={() => setImportOpen(false)}>Close</button>
-              </div>
-            </div>
-
-            <form onSubmit={handleImportSubmit} className="p-4 space-y-4">
-              <FormField label="CSV content">
-                <TextArea value={importCsvText} onChange={(v) => setImportCsvText(v)} />
-              </FormField>
-
-              <div className="flex justify-end gap-3">
-                <CancelBtn onClick={() => setImportOpen(false)} />
-                <PrimaryBtn onClick={handleImportSubmit}>Import</PrimaryBtn>
-              </div>
-            </form>
+            </motion.div>
           </div>
-        </div>
-      )}
-
-      {/* Bulk JSON modal */}
-      {bulkOpen && (
-        <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setBulkOpen(false)} />
-          <div className="relative z-10 w-full max-w-3xl bg-white rounded-lg shadow-lg overflow-auto max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-4 py-3 border-b">
-              <div>
-                <div className="text-lg font-semibold">{bulkMode === "insert" ? "Bulk Insert (JSON)" : "Bulk Upsert (JSON)"}</div>
-                <div className="text-xs text-slate-400">Provide an array. Fields: fa_id?, employee_name|employee_id, school_name|school_id, medium_name|medium_id?, std_name|std_id?, division_name|div_id?, start_date, end_date?, notes?</div>
-              </div>
-              <div>
-                <button className="text-sm text-slate-500 hover:text-slate-700" onClick={() => setBulkOpen(false)}>Close</button>
-              </div>
-            </div>
-
-            <form onSubmit={handleBulkSubmit} className="p-4 space-y-4">
-              <FormField label="JSON array">
-                <TextArea value={bulkJsonText} onChange={(v) => setBulkJsonText(v)} />
-              </FormField>
-
-              <div className="flex justify-end gap-3">
-                <CancelBtn onClick={() => setBulkOpen(false)} />
-                <PrimaryBtn onClick={handleBulkSubmit}>Run</PrimaryBtn>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* component-scoped styles (font import + tiny animation) */}
-      <style>{`
-        /* Font: Inter (scoped import so you can drop this file as-is) */
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap');
-
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
-        .fade-in { animation: fadeIn .28s ease; }
-      `}</style>
-    </main>
+        )}
+      </AnimatePresence>
+    </div>
   );
 }
 
-/* small helpers */
 function defaultForm() {
   return {
     fa_id: null,
@@ -783,6 +934,6 @@ function defaultForm() {
     div_ids: [],
     start_date: "",
     end_date: "",
-    notes: ""
+    notes: "",
   };
 }

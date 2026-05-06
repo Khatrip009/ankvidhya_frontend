@@ -1,904 +1,969 @@
 // src/pages/videos.jsx
-import React, { useEffect, useRef, useState } from 'react';
-import api from '../lib/api';
-import ERPIcons from '../components/icons.jsx';
-import { FormField, TextInput, Select } from '../components/input.jsx';
-import { ExportCSV } from '../components/table.jsx';
+import React, { useEffect, useRef, useState, useCallback } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import api from "../lib/api";
+import ERPIcons from "../components/icons.jsx";
+import { FormField, TextInput, Select } from "../components/input.jsx";
+import {
+  PrimaryBtn,
+  SecondaryBtn,
+  OutlineBtn,
+  DangerBtn,
+  IconBtn,
+} from "../components/buttons.jsx";
+import { ExportCSV, Pagination } from "../components/table.jsx";
+import { LoadingCard } from "../components/cards.jsx";
+import { useToast } from "../hooks/useToast.jsx";
 
-const headerLogo = '/images/Ank_Logo.png';
-const placeholder = '/images/placeholder.png';
-
-// Toggle this to true to automatically persist derived thumbnails to backend via PUT /api/videos/:id
+// ---------- Constants ----------
+const DEFAULT_IMAGE = "/images/placeholder.png";
+const LOGO = "/images/Ank_Logo.png";
 const AUTO_SAVE_DERIVED_THUMBS = true;
 
-const SafeIcon = ({ name, size = 16, style = {}, ...props }) => {
-  const Comp = ERPIcons && ERPIcons[name];
-  if (Comp) return <Comp width={size} height={size} style={style} {...props} />;
-  // fallback play-ish square
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" style={style} {...props}>
-      <rect x="0" y="0" width="24" height="24" rx="3" fill="rgba(11,110,255,0.06)" />
-      <path d="M8 5v14l11-7z" fill="currentColor" />
-    </svg>
-  );
-};
+// ---------- Helpers ----------
+const isDirectVideo = (url) => /\.(mp4|webm|ogg)(\?.*)?$/i.test(url);
+const isYouTube = (url) => /youtu\.be\/|youtube\.com\/(watch|embed)/i.test(url);
+const isVimeo = (url) => /vimeo\.com\/(video\/)?\d+/i.test(url);
+const isGoogleDrive = (url) => /drive\.google\.com/i.test(url);
 
-/* ---------- Helpers ---------- */
-
-function isDirectVideo(url = '') {
-  return /\.(mp4|webm|ogg)(\?.*)?$/i.test(url);
-}
-function isYouTube(url = '') {
-  return /youtu\.be\/|youtube\.com\/(watch|embed)/i.test(url);
-}
-function isVimeo(url = '') {
-  return /vimeo\.com\/(video\/)?\d+/i.test(url);
-}
-function isGoogleDrive(url = '') {
-  return /drive\.google\.com/i.test(url);
-}
-function getYouTubeId(url = '') {
+const getYouTubeId = (url) => {
   try {
     const u = new URL(url);
-    if (u.hostname.includes('youtu.be')) return u.pathname.slice(1);
-    const v = u.searchParams.get('v');
+    if (u.hostname.includes("youtu.be")) return u.pathname.slice(1);
+    const v = u.searchParams.get("v");
     if (v) return v;
     const m = url.match(/embed\/(.+?)(\?|$)/);
     return m ? m[1] : null;
-  } catch { return null; }
-}
-function youTubeThumbnail(url = '') {
+  } catch {
+    return null;
+  }
+};
+
+const youTubeThumbnail = (url) => {
   const id = getYouTubeId(url);
   return id ? `https://img.youtube.com/vi/${id}/hqdefault.jpg` : null;
-}
-async function vimeoThumbnail(url = '') {
+};
+
+const vimeoThumbnail = async (url) => {
   try {
     const oembed = `https://vimeo.com/api/oembed.json?url=${encodeURIComponent(url)}`;
     const res = await fetch(oembed);
-    if (!res.ok) throw new Error('vimeo oembed failed');
-    const json = await res.json();
-    return json?.thumbnail_url || null;
-  } catch (err) {
-    console.warn('vimeo thumbnail error', err);
+    if (res.ok) {
+      const json = await res.json();
+      return json?.thumbnail_url || null;
+    }
+    return null;
+  } catch {
     return null;
   }
-}
-function driveThumbnail(url = '') {
+};
+
+const driveThumbnail = (url) => {
   const m = url.match(/\/file\/d\/([^/]+)\//);
-  if (m) return `https://drive.google.com/thumbnail?id=${m[1]}`; // permission-dependent
-  return null;
-}
+  return m ? `https://drive.google.com/thumbnail?id=${m[1]}` : null;
+};
 
-async function generatePosterFromVideo(url = '') {
-  return new Promise((resolve) => {
-    try {
-      const video = document.createElement('video');
-      let resolved = false;
-      video.crossOrigin = 'anonymous';
-      video.preload = 'metadata';
-      video.muted = true;
-      video.src = url;
+const generatePosterFromVideo = (url) =>
+  new Promise((resolve) => {
+    if (!isDirectVideo(url)) return resolve(null);
+    const video = document.createElement("video");
+    video.preload = "metadata";
+    video.muted = true;
+    video.crossOrigin = "anonymous";
+    video.src = url;
+    let resolved = false;
 
-      const cleanup = () => {
-        try { video.pause(); } catch (e) {}
-        try { video.removeAttribute('src'); } catch (e) {}
-        try { video.load && video.load(); } catch (e) {}
+    const cleanup = () => {
+      try { video.pause(); } catch {}
+      try { video.removeAttribute("src"); } catch {}
+      try { video.load && video.load(); } catch {}
+    };
+
+    video.addEventListener("loadedmetadata", () => {
+      const seekTo = Math.min(1, Math.floor(video.duration / 2) || 0);
+      const onSeeked = () => {
+        try {
+          const canvas = document.createElement("canvas");
+          canvas.width = video.videoWidth || 640;
+          canvas.height = video.videoHeight || 360;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          const dataUrl = canvas.toDataURL("image/jpeg");
+          if (!resolved) {
+            resolved = true;
+            cleanup();
+            resolve(dataUrl);
+          }
+        } catch {
+          if (!resolved) {
+            resolved = true;
+            cleanup();
+            resolve(null);
+          }
+        }
       };
 
-      const onError = () => {
-        if (resolved) return;
+      const timeout = setTimeout(() => {
+        video.removeEventListener("seeked", onSeeked);
+        if (!resolved) {
+          resolved = true;
+          cleanup();
+          resolve(null);
+        }
+      }, 4000);
+
+      video.addEventListener("seeked", function s() {
+        clearTimeout(timeout);
+        onSeeked();
+        video.removeEventListener("seeked", s);
+      });
+
+      try {
+        video.currentTime = seekTo;
+      } catch {
+        onSeeked();
+      }
+    });
+
+    video.addEventListener("error", () => {
+      if (!resolved) {
         resolved = true;
         cleanup();
         resolve(null);
-      };
+      }
+    });
 
-      video.addEventListener('error', onError);
-
-      video.addEventListener('loadedmetadata', () => {
-        const seekTo = Math.min(1, Math.floor(video.duration / 2) || 0);
-        const onSeeked = () => {
-          try {
-            const canvas = document.createElement('canvas');
-            canvas.width = video.videoWidth || 640;
-            canvas.height = video.videoHeight || 360;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            const dataUrl = canvas.toDataURL('image/jpeg');
-            if (!resolved) {
-              resolved = true;
-              cleanup();
-              resolve(dataUrl);
-            }
-          } catch (err) {
-            if (!resolved) {
-              resolved = true;
-              cleanup();
-              resolve(null);
-            }
-          }
-        };
-
-        const t = setTimeout(() => {
-          video.removeEventListener('seeked', onSeeked);
-          if (!resolved) { resolved = true; cleanup(); resolve(null); }
-        }, 4000);
-
-        video.addEventListener('seeked', function s() { clearTimeout(t); onSeeked(); video.removeEventListener('seeked', s); });
-        try { video.currentTime = seekTo; } catch (e) { onSeeked(); }
-      });
-
-      setTimeout(() => { if (!resolved) { resolved = true; cleanup(); resolve(null); } }, 7000);
-    } catch (err) { resolve(null); }
+    setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        cleanup();
+        resolve(null);
+      }
+    }, 7000);
   });
-}
 
-async function deriveThumbnail(link = '') {
+const deriveThumbnail = async (link) => {
   if (!link) return null;
-  try {
-    if (isYouTube(link)) return youTubeThumbnail(link);
-    if (isVimeo(link)) return await vimeoThumbnail(link);
-    if (isGoogleDrive(link)) return driveThumbnail(link);
-    if (isDirectVideo(link)) return await generatePosterFromVideo(link);
-    return null;
-  } catch (err) { console.warn('deriveThumbnail', err); return null; }
-}
+  if (isYouTube(link)) return youTubeThumbnail(link);
+  if (isVimeo(link)) return await vimeoThumbnail(link);
+  if (isGoogleDrive(link)) return driveThumbnail(link);
+  if (isDirectVideo(link)) return await generatePosterFromVideo(link);
+  return null;
+};
 
-/* ---------- Component ---------- */
+// ---------- Main Component ----------
 export default function VideosPage() {
+  const toast = useToast();
+
+  // Lookups
   const [courses, setCourses] = useState([]);
   const [books, setBooks] = useState([]);
   const [chapters, setChapters] = useState([]);
+  const [lookupsFailed, setLookupsFailed] = useState(false);
 
+  // Data
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [pagination, setPagination] = useState({ page: 1, pageSize: 24, total: 0 });
 
-  const [q, setQ] = useState('');
-  const qRef = useRef('');
-  const debounceTimer = useRef(null);
+  // Filters
+  const [search, setSearch] = useState("");
+  const [fCourse, setFCourse] = useState("");
+  const [fBook, setFBook] = useState("");
+  const [fChapter, setFChapter] = useState("");
 
-  const [fCourse, setFCourse] = useState('');
-  const [fBook, setFBook] = useState('');
-  const [fChapter, setFChapter] = useState('');
-
-  // editor/player state
+  // Modals
   const [editorOpen, setEditorOpen] = useState(false);
-  const [playerOpen, setPlayerOpen] = useState(false);
-  const [playerHtml, setPlayerHtml] = useState('');
-  const [playerTitle, setPlayerTitle] = useState('Video');
-
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({
-    video_id: null, tittle: '', title: '', video_link: '', description: '', course_id: '', book_id: '', chapter_id: ''
+    video_id: null,
+    tittle: "",
+    title: "",
+    video_link: "",
+    description: "",
+    course_id: "",
+    book_id: "",
+    chapter_id: "",
   });
+  const [thumbnailPreview, setThumbnailPreview] = useState(DEFAULT_IMAGE);
 
-  // derived thumbnail preview (no upload)
-  const [thumbnailPreview, setThumbnailPreview] = useState(placeholder);
-  const mounted = useRef(false);
-  const lookupsFailedRef = useRef(false);
-  const [lookupsFailedFlag, setLookupsFailedFlag] = useState(false);
+  const [playerOpen, setPlayerOpen] = useState(false);
+  const [playerHtml, setPlayerHtml] = useState("");
+  const [playerTitle, setPlayerTitle] = useState("");
 
-  // CSV import modal state
   const [importOpen, setImportOpen] = useState(false);
-  const [importText, setImportText] = useState('');
+  const [importText, setImportText] = useState("");
   const [importPreviewRows, setImportPreviewRows] = useState([]);
   const fileInputRef = useRef(null);
 
-  /* ---------- Load lookups ---------- */
+  const debounceTimer = useRef(null);
+
+  // Load lookups
   useEffect(() => {
-    mounted.current = true;
     (async () => {
       try {
-        const loader = async () => {
-          const [cRes, bRes, chRes] = await Promise.all([
-            api.get('/api/courses', { query: { pageSize: 1000 } }),
-            api.get('/api/books', { query: { pageSize: 1000 } }),
-            api.get('/api/chapters', { query: { pageSize: 1000 } }),
-          ]);
-          return [cRes?.data || [], bRes?.data || [], chRes?.data || []];
-        };
-        const [cd, bd, chd] = await loader();
-        if (!mounted.current) return;
-        setCourses(cd);
-        setBooks(bd);
-        setChapters(chd);
-        lookupsFailedRef.current = false;
-        setLookupsFailedFlag(false);
+        const [cRes, bRes, chRes] = await Promise.all([
+          api.get("/api/courses", { params: { pageSize: 1000 } }),
+          api.get("/api/books", { params: { pageSize: 1000 } }),
+          api.get("/api/chapters", { params: { pageSize: 1000 } }),
+        ]);
+        setCourses(cRes?.data || []);
+        setBooks(bRes?.data || []);
+        setChapters(chRes?.data || []);
+        setLookupsFailed(false);
       } catch (err) {
-        console.error('lookups', err);
-        lookupsFailedRef.current = true;
-        setLookupsFailedFlag(true);
-        window.ui?.toast?.('Failed to load lookup lists — backend may be busy', 'warning');
+        console.error("Lookup load failed", err);
+        toast.error("Failed to load dropdown data");
+        setLookupsFailed(true);
       }
     })();
-    return () => { mounted.current = false; };
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* ---------- Fetch rows (debounced search) ---------- */
-  useEffect(() => {
-    qRef.current = q;
-    if (debounceTimer.current) clearTimeout(debounceTimer.current);
-    debounceTimer.current = setTimeout(() => {
-      setPagination(p => ({ ...p, page: 1 }));
-      fetchRows({ page: 1, pageSize: pagination.pageSize, search: qRef.current, courseId: fCourse, bookId: fBook, chapterId: fChapter });
-    }, 350);
-    return () => { if (debounceTimer.current) clearTimeout(debounceTimer.current); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q]);
+  // Fetch videos
+  const fetchVideos = useCallback(
+    async (
+      page = 1,
+      pageSize = pagination.pageSize,
+      s = search,
+      course = fCourse,
+      book = fBook,
+      chapter = fChapter
+    ) => {
+      setLoading(true);
+      try {
+        const params = { page, pageSize };
+        if (s) params.search = s;
+        if (course) params.course_id = course;
+        if (book) params.book_id = book;
+        if (chapter) params.chapter_id = chapter;
 
-  useEffect(() => {
-    fetchRows({ page: pagination.page, pageSize: pagination.pageSize, search: qRef.current, courseId: fCourse, bookId: fBook, chapterId: fChapter });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pagination.page, pagination.pageSize, fCourse, fBook, fChapter]);
+        const res = await api.get("/api/videos", { params });
+        let data = res?.data || [];
+        const pg = res?.pagination || { page, pageSize, total: data.length };
 
-  async function fetchRows({ page = 1, pageSize = 24, search = '', courseId = '', bookId = '', chapterId = '' } = {}) {
-    setLoading(true);
-    try {
-      const qobj = { page, pageSize };
-      if (search) qobj.search = search;
-      if (courseId) qobj.course_id = courseId;
-      if (bookId) qobj.book_id = bookId;
-      if (chapterId) qobj.chapter_id = chapterId;
+        // Normalize title/thumbnail
+        data = data.map((r) => {
+          const title = r.tittle || r.title || "";
+          const immediateThumb = r.thumbnail || youTubeThumbnail(r.video_link) || null;
+          return { ...r, displayTitle: title, tittle: title, title, thumbnail: immediateThumb, _deriving: false };
+        });
 
-      const res = await api.get('/api/videos', { query: qobj });
-      const data = res?.data || [];
-      const pg = res?.pagination || { page, pageSize, total: data.length };
+        setRows(data);
+        setPagination({ page: pg.page, pageSize: pg.pageSize, total: pg.total });
 
-      // normalize each row to have `displayTitle` and prefer tittle then title
-      // Also provide an immediate thumbnail fallback for YouTube links so the grid shows it
-      const mapped = data.map(r => {
-        const t = r.tittle || r.title || '';
-        const immediateThumb = r.thumbnail || (r.video_link ? youTubeThumbnail(r.video_link) : null);
-        return {
-          ...r,
-          displayTitle: t,
-          tittle: r.tittle || r.title || '',
-          title: r.title || r.tittle || '',
-          thumbnail: immediateThumb, // may be null
-          _deriving: false
-        };
-      });
-
-      if (!mounted.current) return;
-      setRows(mapped);
-      setPagination({ page: pg.page, pageSize: pg.pageSize, total: pg.total });
-
-      // Async pass: for rows that still have no thumbnail, try to derive (Vimeo, direct video).
-      (async () => {
-        const snapshot = mapped.slice();
-        for (const r of snapshot) {
-          if (r.thumbnail || !r.video_link) continue;
-          setRows(prev => prev.map(p => p.video_id === r.video_id ? { ...p, _deriving: true } : p));
-          try {
-            const derived = await deriveThumbnail(r.video_link || '');
+        // Async derive missing thumbnails
+        (async () => {
+          for (const r of data) {
+            if (r.thumbnail || !r.video_link) continue;
+            setRows((prev) =>
+              prev.map((p) => (p.video_id === r.video_id ? { ...p, _deriving: true } : p))
+            );
+            const derived = await deriveThumbnail(r.video_link);
             if (derived) {
-              setRows(prev => prev.map(p => p.video_id === r.video_id ? { ...p, thumbnail: derived, _deriving: false } : p));
+              setRows((prev) =>
+                prev.map((p) =>
+                  p.video_id === r.video_id ? { ...p, thumbnail: derived, _deriving: false } : p
+                )
+              );
               if (AUTO_SAVE_DERIVED_THUMBS) {
                 try {
-                  await api.put(`/api/videos/${r.video_id}`, { thumbnail: derived, tittle: r.tittle || r.title, title: r.tittle || r.title });
-                } catch (err) {
-                  console.warn('auto-save thumbnail failed', err);
-                }
+                  await api.put(`/api/videos/${r.video_id}`, {
+                    thumbnail: derived,
+                    tittle: r.tittle,
+                    title: r.title,
+                  });
+                } catch (e) { /* silent */ }
               }
             } else {
-              setRows(prev => prev.map(p => p.video_id === r.video_id ? { ...p, _deriving: false } : p));
+              setRows((prev) =>
+                prev.map((p) =>
+                  p.video_id === r.video_id ? { ...p, _deriving: false } : p
+                )
+              );
             }
-          } catch (err) {
-            console.warn('derive thumbnail for row failed', err);
-            setRows(prev => prev.map(p => p.video_id === r.video_id ? { ...p, _deriving: false } : p));
           }
-        }
-      })();
-    } catch (err) {
-      console.error('fetch videos', err);
-      if (mounted.current) {
-        window.ui?.toast?.('Failed to load videos — backend may be busy', 'danger');
-        setRows([]);
-        setPagination(p => ({ ...p, total: 0 }));
+        })();
+      } catch (err) {
+        console.error("Fetch videos failed", err);
+        toast.error("Failed to load videos");
+      } finally {
+        setLoading(false);
       }
-    } finally {
-      if (mounted.current) setLoading(false);
-    }
-  }
+    },
+    [search, fCourse, fBook, fChapter, toast]
+  );
 
-  /* ---------- Editor open/populate ---------- */
-  function openEditor(row = null) {
-    setEditing(row);
+  // Debounced search
+  useEffect(() => {
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    debounceTimer.current = setTimeout(() => {
+      setPagination((p) => ({ ...p, page: 1 }));
+      fetchVideos(1, pagination.pageSize, search, fCourse, fBook, fChapter);
+    }, 350);
+    return () => clearTimeout(debounceTimer.current);
+  }, [search]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Refetch on filter/pagination change
+  useEffect(() => {
+    fetchVideos(pagination.page, pagination.pageSize, search, fCourse, fBook, fChapter);
+  }, [pagination.page, pagination.pageSize, fCourse, fBook, fChapter]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ----- Editor Helpers -----
+  const openEditor = (row = null) => {
     if (row) {
+      setEditing(row);
       setForm({
         video_id: row.video_id || null,
-        tittle: row.tittle || row.title || '',
-        title: row.title || row.tittle || '',
-        video_link: row.video_link || '',
-        description: row.description || '',
-        course_id: row.course_id || '',
-        book_id: row.book_id || '',
-        chapter_id: row.chapter_id || ''
+        tittle: row.tittle || row.title || "",
+        title: row.title || row.tittle || "",
+        video_link: row.video_link || "",
+        description: row.description || "",
+        course_id: row.course_id || "",
+        book_id: row.book_id || "",
+        chapter_id: row.chapter_id || "",
       });
-      (async () => {
-        if (row.thumbnail) setThumbnailPreview(row.thumbnail);
-        else {
-          setThumbnailPreview(placeholder);
-          const derived = await deriveThumbnail(row.video_link || '');
-          setThumbnailPreview(derived || placeholder);
-        }
-      })();
+      setThumbnailPreview(row.thumbnail || DEFAULT_IMAGE);
     } else {
-      setForm({ video_id: null, tittle: '', title: '', video_link: '', description: '', course_id: '', book_id: '', chapter_id: '' });
-      setThumbnailPreview(placeholder);
+      setEditing(null);
+      setForm({
+        video_id: null,
+        tittle: "",
+        title: "",
+        video_link: "",
+        description: "",
+        course_id: "",
+        book_id: "",
+        chapter_id: "",
+      });
+      setThumbnailPreview(DEFAULT_IMAGE);
     }
     setEditorOpen(true);
-  }
+  };
 
-  function openPlayer(row) {
-    const link = row.video_link || '';
-    setPlayerTitle(row.tittle || row.title || 'Video');
-    setPlayerHtml(makePlayerHtml(link, row.tittle || row.title || 'Video'));
-    setPlayerOpen(true);
-  }
-
-  /* ---------- Delete ---------- */
-  async function deleteRow(row) {
-    if (!confirm('Delete this video?')) return;
-    try {
-      await api.del(`/api/videos/${row.video_id}`);
-      window.ui?.toast?.('Video deleted', 'success');
-      fetchRows({ page: pagination.page, pageSize: pagination.pageSize, search: qRef.current, courseId: fCourse, bookId: fBook, chapterId: fChapter });
-    } catch (err) {
-      console.error('delete', err);
-      window.ui?.toast?.('Delete failed', 'danger');
+  const handleSave = async (e) => {
+    e?.preventDefault?.();
+    const titleVal = (form.tittle || form.title || "").trim();
+    if (!titleVal) {
+      toast.error("Title is required");
+      return;
     }
-  }
-
-  /* ---------- Save (create/update) ---------- */
-  async function handleSave(e) {
-    e && e.preventDefault && e.preventDefault();
-    const titleVal = (form.tittle || form.title || '').trim();
-    if (!titleVal) { window.ui?.toast?.('Title required', 'danger'); return; }
 
     try {
       let thumbnailUrl = null;
-      try { thumbnailUrl = await deriveThumbnail(form.video_link || ''); } catch (e) { thumbnailUrl = null; }
+      if (form.video_link) {
+        thumbnailUrl = await deriveThumbnail(form.video_link);
+      }
 
       const payload = {
         tittle: titleVal,
         title: titleVal,
-        video_link: (form.video_link || '').trim() || null,
-        description: (form.description || '').trim() || null,
+        video_link: (form.video_link || "").trim() || null,
+        description: (form.description || "").trim() || null,
         course_id: form.course_id ? Number(form.course_id) : null,
         book_id: form.book_id ? Number(form.book_id) : null,
         chapter_id: form.chapter_id ? Number(form.chapter_id) : null,
-        thumbnail: thumbnailUrl || null
+        thumbnail: thumbnailUrl || null,
       };
 
-      if (editing && editing.video_id) {
+      if (editing?.video_id) {
         await api.put(`/api/videos/${editing.video_id}`, payload);
-        window.ui?.toast?.('Video updated', 'success');
+        toast.success("Video updated");
       } else {
-        await api.post('/api/videos', payload);
-        window.ui?.toast?.('Video created', 'success');
+        await api.post("/api/videos", payload);
+        toast.success("Video created");
       }
 
       setEditorOpen(false);
       setEditing(null);
-      fetchRows({ page: 1, pageSize: pagination.pageSize, search: qRef.current, courseId: fCourse, bookId: fBook, chapterId: fChapter });
+      fetchVideos(1, pagination.pageSize, search, fCourse, fBook, fChapter);
     } catch (err) {
-      console.error('save video', err);
-      const serverMsg = err?.response?.data?.message || err?.message || 'Save failed';
-      window.ui?.toast?.(serverMsg, 'danger');
+      console.error("Save video error", err);
+      toast.error(err?.response?.data?.message || "Save failed");
     }
-  }
+  };
 
-  /* ---------- Small UI helpers ---------- */
-  function safeImgOnError(e) {
-    if (e?.currentTarget?.dataset?.fallback) return;
-    const fallback = placeholder;
-    if (e?.currentTarget) {
-      e.currentTarget.dataset.fallback = '1';
-      e.currentTarget.src = fallback;
-    }
-  }
-
-  function fmtDate(s) { return s ? new Date(s).toLocaleString() : '-'; }
-
-  /* ---------- Derived option lists ---------- */
-  const booksForCourse = (books || []).filter(b => !fCourse || String(b.course_id) === String(fCourse));
-  const chaptersForBook = (chapters || []).filter(ch => !fBook || String(ch.book_id) === String(fBook));
-
-  /* ---------- Effect: recompute thumbnail preview when link changes ---------- */
-  useEffect(() => {
-    let active = true;
-    const id = setTimeout(async () => {
-      if (!form.video_link) { setThumbnailPreview(placeholder); return; }
-      setThumbnailPreview(placeholder);
-      const derived = await deriveThumbnail(form.video_link || '');
-      if (!active) return;
-      setThumbnailPreview(derived || placeholder);
-    }, 300);
-    return () => { active = false; clearTimeout(id); };
-  }, [form.video_link]);
-
-  /* ---------- CSV import helpers ---------- */
-  function parseCSVQuick(text) {
-    // very lightweight parse used only for preview (not authoritative)
-    const lines = text.split(/\r?\n/).filter(Boolean);
-    if (!lines.length) return [];
-    // parse headers
-    const headers = parseCSVRow(lines[0]).map(h => h.toLowerCase());
-    const preview = [];
-    for (let i = 1; i < Math.min(lines.length, 6); i++) {
-      const row = parseCSVRow(lines[i]);
-      const obj = {};
-      for (let j = 0; j < headers.length; j++) obj[headers[j]] = row[j] !== undefined ? row[j] : '';
-      preview.push(obj);
-    }
-    return preview;
-  }
-  function parseCSVRow(line) {
-    const out = [];
-    let cur = '';
-    let inQuotes = false;
-    for (let i=0;i<line.length;i++) {
-      const ch = line[i];
-      if (ch === '"') {
-        if (inQuotes && line[i+1] === '"') { cur += '"'; i++; continue; }
-        inQuotes = !inQuotes;
-        continue;
-      }
-      if (!inQuotes && ch === ',') { out.push(cur); cur = ''; continue; }
-      cur += ch;
-    }
-    out.push(cur);
-    return out.map(s => s.trim());
-  }
-
-  async function onImportFileSelected(files) {
-    if (!files || !files.length) return;
-    const f = files[0];
+  const handleDelete = async (row) => {
+    if (!window.confirm("Delete this video?")) return;
     try {
-      const txt = await f.text();
-      setImportText(txt);
-      setImportPreviewRows(parseCSVQuick(txt));
+      await api.delete(`/api/videos/${row.video_id}`);
+      toast.success("Video deleted");
+      fetchVideos(pagination.page, pagination.pageSize, search, fCourse, fBook, fChapter);
     } catch (err) {
-      console.error('read csv', err);
-      window.ui?.toast?.('Failed to read file', 'danger');
+      console.error("Delete failed", err);
+      toast.error("Delete failed");
     }
-  }
+  };
 
-  async function submitImport() {
-    const text = (importText || '').trim();
-    if (!text) { window.ui?.toast?.('CSV content required', 'danger'); return; }
-    try {
-      // send to server endpoint that expects body.csv
-      await api.post('/api/videos/import', { csv: text });
-      window.ui?.toast?.('CSV imported successfully', 'success');
-      setImportOpen(false);
-      setImportText('');
-      setImportPreviewRows([]);
-      fetchRows({ page: 1, pageSize: pagination.pageSize, search: qRef.current, courseId: fCourse, bookId: fBook, chapterId: fChapter });
-    } catch (err) {
-      console.error('import csv', err);
-      const serverMsg = err?.response?.data?.message || err?.message || 'Import failed';
-      window.ui?.toast?.(serverMsg, 'danger');
-    }
-  }
+  // ----- Player -----
+  const openPlayer = (row) => {
+    const link = row.video_link || "";
+    setPlayerTitle(row.tittle || row.title || "Video");
+    setPlayerHtml(makePlayerHtml(link, row.tittle || row.title || "Video"));
+    setPlayerOpen(true);
+  };
 
-  /* ---------- Player template helpers ---------- */
-  function youTubeEmbed(url = '') {
-    try {
-      const u = new URL(url);
-      if (u.hostname.includes('youtu.be')) return `https://www.youtube.com/embed/${u.pathname.slice(1)}`;
-      const id = u.searchParams.get('v');
-      if (id) return `https://www.youtube.com/embed/${id}`;
-      return url.replace('/watch?v=', '/embed/');
-    } catch { return url; }
-  }
-  function vimeoEmbed(url = '') {
-    const m = url.match(/vimeo\.com\/(?:video\/)?(\d+)/i);
-    return m ? `https://player.vimeo.com/video/${m[1]}` : url;
-  }
-  function driveEmbed(url = '') {
-    const m = url.match(/\/file\/d\/([^/]+)\//);
-    if (m) return `https://drive.google.com/file/d/${m[1]}/preview`;
-    return url;
-  }
-  function makePlayerHtml(link = '', title = '') {
-    if (!link) return `<div class="p-4 text-muted">No video link</div>`;
+  const makePlayerHtml = (link, title) => {
+    if (!link) return `<div class="p-4 text-gray-500">No video link</div>`;
     if (isDirectVideo(link)) {
       return `
-      <video controls playsinline preload="metadata" style="width:100%;max-height:70vh;border-radius:8px;background:#000">
-        <source src="${link}">
-        Your browser does not support the video tag.
-      </video>`;
+        <video controls playsinline preload="metadata"
+          style="width:100%;max-height:70vh;border-radius:8px;background:#000">
+          <source src="${link}">
+          Your browser does not support the video tag.
+        </video>`;
     }
     let src = link;
     if (isYouTube(link)) src = youTubeEmbed(link);
     else if (isVimeo(link)) src = vimeoEmbed(link);
     else if (isGoogleDrive(link)) src = driveEmbed(link);
     return `
-    <div style="position:relative;padding-top:56.25%">
-      <iframe src="${src}" title="${(title || 'Video').replace(/"/g,'')}" style="position:absolute;left:0;top:0;width:100%;height:100%;border:0;border-radius:8px;" allow="accelerometer; autoplay; encrypted-media; picture-in-picture; fullscreen" allowFullScreen></iframe>
-    </div>`;
-  }
+      <div style="position:relative;padding-top:56.25%">
+        <iframe src="${src}" title="${title.replace(/"/g, "")}"
+          style="position:absolute;left:0;top:0;width:100%;height:100%;border:0;border-radius:8px;"
+          allow="accelerometer; autoplay; encrypted-media; picture-in-picture; fullscreen" allowFullScreen>
+        </iframe>
+      </div>`;
+  };
 
-  /* ---------- Render ---------- */
+  const youTubeEmbed = (url) => {
+    try {
+      const u = new URL(url);
+      if (u.hostname.includes("youtu.be")) return `https://www.youtube.com/embed/${u.pathname.slice(1)}`;
+      const id = u.searchParams.get("v");
+      if (id) return `https://www.youtube.com/embed/${id}`;
+      return url.replace("/watch?v=", "/embed/");
+    } catch {
+      return url;
+    }
+  };
+  const vimeoEmbed = (url) => {
+    const m = url.match(/vimeo\.com\/(?:video\/)?(\d+)/i);
+    return m ? `https://player.vimeo.com/video/${m[1]}` : url;
+  };
+  const driveEmbed = (url) => {
+    const m = url.match(/\/file\/d\/([^/]+)\//);
+    return m ? `https://drive.google.com/file/d/${m[1]}/preview` : url;
+  };
+
+  // ----- Import CSV -----
+  const parseCSVQuick = (text) => {
+    const lines = text.split(/\r?\n/).filter(Boolean);
+    if (!lines.length) return [];
+    const parseRow = (line) => {
+      const out = [];
+      let cur = "";
+      let inQuote = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (ch === '"') {
+          if (inQuote && line[i + 1] === '"') { cur += '"'; i++; continue; }
+          inQuote = !inQuote;
+          continue;
+        }
+        if (!inQuote && ch === ",") { out.push(cur); cur = ""; continue; }
+        cur += ch;
+      }
+      out.push(cur);
+      return out.map((s) => s.trim());
+    };
+    const headers = parseRow(lines[0]).map((h) => h.toLowerCase());
+    const preview = [];
+    for (let i = 1; i < Math.min(lines.length, 6); i++) {
+      const row = parseRow(lines[i]);
+      const obj = {};
+      for (let j = 0; j < headers.length; j++) obj[headers[j]] = row[j] !== undefined ? row[j] : "";
+      preview.push(obj);
+    }
+    return preview;
+  };
+
+  const onImportFileSelected = async (files) => {
+    if (!files?.length) return;
+    const file = files[0];
+    try {
+      const text = await file.text();
+      setImportText(text);
+      setImportPreviewRows(parseCSVQuick(text));
+    } catch {
+      toast.error("Failed to read file");
+    }
+  };
+
+  const submitImport = async () => {
+    const text = importText.trim();
+    if (!text) { toast.error("CSV content required"); return; }
+    try {
+      await api.post("/api/videos/import", { csv: text });
+      toast.success("CSV imported successfully");
+      setImportOpen(false);
+      setImportText("");
+      setImportPreviewRows([]);
+      fetchVideos(1, pagination.pageSize, search, fCourse, fBook, fChapter);
+    } catch (err) {
+      console.error("Import failed", err);
+      toast.error(err?.response?.data?.message || "Import failed");
+    }
+  };
+
+  // Derive filtered options for selects
+  const booksForCourse = books.filter((b) => !fCourse || String(b.course_id) === String(fCourse));
+  const chaptersForBook = chapters.filter((ch) => !fBook || String(ch.book_id) === String(fBook));
+
+  // Effect for thumbnail preview on video_link change
+  useEffect(() => {
+    let active = true;
+    const id = setTimeout(async () => {
+      if (!form.video_link) {
+        setThumbnailPreview(DEFAULT_IMAGE);
+        return;
+      }
+      const derived = await deriveThumbnail(form.video_link);
+      if (active) setThumbnailPreview(derived || DEFAULT_IMAGE);
+    }, 300);
+    return () => { active = false; clearTimeout(id); };
+  }, [form.video_link]);
+
+  const staticColumns = [
+    { Header: "Title", accessor: "tittle" },
+    { Header: "Course", accessor: "course_name" },
+    { Header: "Book", accessor: "book_name" },
+  ];
+
   return (
-    <main className="p-6 max-w-6xl mx-auto" style={{ fontFamily: "'Poppins', system-ui, -apple-system, 'Segoe UI', Roboto", fontSize: 16 }}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap');
-
-        :root{
-          --bg:#f5f8ff;
-          --card:#ffffff;
-          --muted:#56607a;
-          --accent:#0ea5a3;
-          --accent-2:#0B6EFF; /* corporate blue */
-          --glass: rgba(255,255,255,0.6);
-          --radius:14px;
-        }
-
-        body, input, select, textarea, button { font-family: 'Poppins', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; }
-
-        .panel {
-          background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(250,252,255,0.98));
-          border-radius: 16px;
-          padding: 18px;
-          box-shadow: 0 14px 40px rgba(11,34,80,0.06);
-          border: 1px solid rgba(11,34,80,0.04);
-          transition: transform .18s ease, box-shadow .18s ease;
-        }
-        .panel:hover { transform: translateY(-3px); box-shadow: 0 22px 56px rgba(11,34,80,0.08); }
-
-        .controls { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
-        .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap:18px; }
-
-        .card {
-          border-radius: 12px;
-          overflow: hidden;
-          border: 1px solid rgba(11,34,80,0.06);
-          background: var(--card);
-          display:flex;
-          flex-direction:column;
-          transition: transform .18s cubic-bezier(.2,.8,.2,1), box-shadow .18s ease;
-        }
-        .card:hover { transform: translateY(-8px) scale(1.01); box-shadow: 0 26px 60px rgba(11,34,80,0.08); }
-
-        .thumb-wrap { position: relative; display:block; }
-        .thumb {
-          width:100%;
-          height:170px;
-          object-fit:cover;
-          background: linear-gradient(180deg,#eef2ff,#f8fafc);
-          display:block;
-          transition: transform .18s ease;
-        }
-        .thumb-wrap:hover .thumb { transform: scale(1.02); }
-
-        .thumb-play {
-          position: absolute;
-          left: 50%;
-          top: 50%;
-          transform: translate(-50%, -50%) scale(0.98);
-          width: 64px;
-          height: 64px;
-          border-radius: 999px;
-          display:flex;
-          align-items:center;
-          justify-content:center;
-          background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(255,255,255,0.9));
-          box-shadow: 0 12px 28px rgba(11,110,255,0.10);
-          opacity: 0;
-          transition: opacity .18s ease, transform .18s ease;
-          border: 2px solid rgba(11,110,255,0.12);
-        }
-        .thumb-wrap:hover .thumb-play { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-        .thumb-play svg { width:22px; height:22px; fill: var(--accent-2); }
-
-        .skel {
-          width: 100%;
-          height: 170px;
-          border-radius: 6px;
-          background: linear-gradient(90deg, #f3f4f6 25%, #eef2ff 50%, #f3f4f6 75%);
-          background-size: 200% 100%;
-          animation: skelShimmer 1.4s linear infinite;
-        }
-        @keyframes skelShimmer { 0%{ background-position:200% 0 } 100%{ background-position:-200% 0 } }
-
-        .card-body { padding:14px; display:flex; flex-direction:column; gap:10px; }
-        .muted { color:var(--muted); font-size:14px; }
-        h2 { font-size:20px; margin:0; color:#0f172a; letter-spacing:0.2px; }
-
-        .form-control, .form-select, input[type=text], textarea { font-size:15px; padding:10px 12px; border-radius:10px; }
-        .btn { padding:10px 12px; border-radius:10px; font-weight:600; font-size:15px; transition: transform .12s ease, box-shadow .12s ease; cursor:pointer; }
-        .btn:active { transform: translateY(1px); }
-        .btn-primary { background: var(--accent-2); color: white; border:none; box-shadow: 0 10px 28px rgba(11,110,255,0.12); }
-        .btn-primary:hover { filter: saturate(1.05); box-shadow: 0 14px 36px rgba(11,110,255,0.14); }
-        .btn-outline { background: transparent; border:1px solid rgba(11,34,80,0.06); }
-
-        .btn-sm { padding:8px 10px; border-radius:8px; }
-        .editor-header { display:flex; align-items:center; gap:12px; padding:18px; border-bottom:1px solid rgba(11,34,80,0.04); }
-        .editor-title { flex:1; text-align:center; font-weight:700; font-size:18px; }
-
-        .modal-backdrop{ position:fixed; inset:0; z-index:9999; background:linear-gradient(0deg, rgba(2,6,23,0.55), rgba(2,6,23,0.45)); display:flex; align-items:center; justify-content:center; }
-        .modal-card { width:980px; max-width:96%; border-radius:12px; overflow:hidden; background:linear-gradient(180deg,#fff,#fbfdff); box-shadow: 0 28px 80px rgba(11,34,80,0.18); transform: translateY(8px); animation: modalIn .22s cubic-bezier(.2,.9,.2,1) both; }
-        @keyframes modalIn { from { opacity: 0; transform: translateY(28px); } to { opacity: 1; transform: translateY(0); } }
-
-        @media (max-width: 900px) {
-          .grid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap:12px; }
-          .thumb { height: 150px; }
-          .card-body { padding:12px; }
-        }
-      `}</style>
-
-      <div style={{ display: 'flex', gap: 12, justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-          <img src={headerLogo} alt="logo" style={{ height: 36 }} onError={safeImgOnError} />
-          <div style={{ fontWeight: 700, fontSize: 20 }}>Videos — Gallery</div>
-        </div>
-
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          <button className="btn btn-outline" onClick={() => setImportOpen(true)}><ERPIcons.UploadCloud style={{ width: 16, height: 16, marginRight: 8 }} />Import CSV</button>
-          <ExportCSV columns={[{ Header: 'Title', accessor: 'tittle' }, { Header: 'Course', accessor: 'course_name' }, { Header: 'Book', accessor: 'book_name' }]} rows={rows} filename={`videos_${new Date().toISOString().slice(0,10)}.csv`} />
-          <button className="btn btn-primary" onClick={() => openEditor(null)} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <ERPIcons.Plus style={{ width: 16, height: 16 }} /> New Video
-          </button>
-        </div>
-      </div>
-
-      <div className="panel" style={{ marginBottom: 18 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <div style={{ color: 'var(--muted)', marginTop: 2 }}>Click a card to play inline. Create and manage videos with thumbnails and metadata.</div>
-            {lookupsFailedFlag && <div style={{ marginTop: 8, color: '#b45309' }} className="small">Lookup data failed to load — selectors may be empty.</div>}
-          </div>
-
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            <div style={{ width: 220 }}>
-              <Select value={fCourse} onChange={(v) => { setFCourse(v); setFBook(''); setFChapter(''); setPagination(p => ({ ...p, page: 1 })); }} options={[{ value: '', label: '— any course —' }].concat((courses || []).map(c => ({ value: c.course_id, label: c.course_name })))} />
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-3 sm:p-5 lg:p-6 transition-colors">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-4 sm:mb-6"
+        >
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div>
+              <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white">Videos</h1>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                Manage video gallery – thumbnails derived automatically
+              </p>
             </div>
-            <div style={{ width: 220 }}>
-              <Select value={fBook} onChange={(v) => { setFBook(v); setFChapter(''); setPagination(p => ({ ...p, page: 1 })); }} options={[{ value: '', label: '— any book —' }].concat(booksForCourse.map(b => ({ value: b.book_id, label: b.book_name })))} />
-            </div>
-            <div style={{ width: 220 }}>
-              <Select value={fChapter} onChange={(v) => { setFChapter(v); setPagination(p => ({ ...p, page: 1 })); }} options={[{ value: '', label: '— any chapter —' }].concat(chaptersForBook.map(ch => ({ value: ch.chapter_id, label: ch.chapter_name })))} />
+            <div className="flex flex-wrap items-center gap-2">
+              <OutlineBtn size="sm" onClick={() => setImportOpen(true)}>
+                Import CSV
+              </OutlineBtn>
+              <ExportCSV
+                columns={staticColumns}
+                rows={rows}
+                filename={`videos_export_${new Date().toISOString().slice(0, 10)}.csv`}
+              />
+              <PrimaryBtn size="sm" onClick={() => openEditor(null)} leftIcon={ERPIcons.Plus}>
+                New Video
+              </PrimaryBtn>
             </div>
           </div>
+        </motion.div>
+
+        {/* Filters */}
+        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4 sm:p-5 shadow-sm mb-4 sm:mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="sm:col-span-2 lg:col-span-1">
+              <FormField label="Search">
+                <TextInput
+                  placeholder="Search title or description..."
+                  value={search}
+                  onChange={setSearch}
+                />
+              </FormField>
+            </div>
+            <FormField label="Course">
+              <Select
+                value={fCourse}
+                onChange={(v) => {
+                  setFCourse(v);
+                  setFBook("");
+                  setFChapter("");
+                }}
+                options={[
+                  { value: "", label: "All Courses" },
+                  ...courses.map((c) => ({ value: c.course_id, label: c.course_name })),
+                ]}
+              />
+            </FormField>
+            <FormField label="Book">
+              <Select
+                value={fBook}
+                onChange={(v) => {
+                  setFBook(v);
+                  setFChapter("");
+                }}
+                options={[
+                  { value: "", label: "All Books" },
+                  ...booksForCourse.map((b) => ({ value: b.book_id, label: b.book_name })),
+                ]}
+              />
+            </FormField>
+            <FormField label="Chapter">
+              <Select
+                value={fChapter}
+                onChange={setFChapter}
+                options={[
+                  { value: "", label: "All Chapters" },
+                  ...chaptersForBook.map((ch) => ({ value: ch.chapter_id, label: ch.chapter_name })),
+                ]}
+              />
+            </FormField>
+          </div>
+          <div className="flex justify-between items-center mt-3">
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-gray-500 dark:text-gray-400">Rows:</label>
+              <select
+                value={pagination.pageSize}
+                onChange={(e) => setPagination((p) => ({ ...p, pageSize: Number(e.target.value), page: 1 }))}
+                className="border border-gray-300 dark:border-gray-600 rounded px-2 py-1 text-sm bg-white dark:bg-gray-700"
+              >
+                {[12, 24, 48].map((n) => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+            </div>
+            <SecondaryBtn size="sm" onClick={() => fetchVideos(1, pagination.pageSize)}>
+              Reload
+            </SecondaryBtn>
+          </div>
         </div>
 
-        <div style={{ marginTop: 14 }} className="controls">
-          <div style={{ flex: '1 1 360px' }}>
-            <TextInput placeholder="Search title or description..." value={q} onChange={(v) => { setQ(v); }} />
-          </div>
-
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
-            <select value={pagination.pageSize} onChange={(e) => setPagination(p => ({ ...p, pageSize: Number(e.target.value), page: 1 }))} className="form-select">
-              {[12, 24, 48].map(n => <option key={n} value={n}>{n}</option>)}
-            </select>
-            <button className="btn btn-outline" onClick={() => fetchRows({ page: 1, pageSize: pagination.pageSize, search: qRef.current, courseId: fCourse, bookId: fBook, chapterId: fChapter })}>Reload</button>
-          </div>
-        </div>
-      </div>
-
-      <div style={{ marginTop: 14 }}>
-        {loading ? <div style={{ padding: 28, textAlign: 'center' }}>Loading…</div> : (
-          <div className="grid">
-            {(!rows || rows.length === 0) && <div className="muted">No videos found</div>}
-            {rows.map(v => (
-              <article key={v.video_id} className="card" aria-labelledby={`vtitle-${v.video_id}`}>
-                <div style={{ cursor: 'pointer' }} onClick={() => openPlayer(v)}>
-                  <div className="thumb-wrap" role="button" aria-label={`Play ${v.tittle || v.title || v.displayTitle}`}>
-                    {(v._deriving || !v.thumbnail) ? (
-                      <div className="skel" />
-                    ) : (
-                      <img className="thumb" src={v.thumbnail || placeholder} alt={v.tittle || v.title || 'thumb'} onError={safeImgOnError} />
-                    )}
-                    <div className="thumb-play" aria-hidden>
-                      <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
-                        <path d="M8 5v14l11-7z" />
-                      </svg>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="card-body">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: 10 }}>
-                    <div style={{ flex: 1 }}>
-                      <div id={`vtitle-${v.video_id}`} style={{ fontWeight: 700, color: '#0f172a', fontSize: 16 }}>{v.tittle || v.title || v.displayTitle}</div>
-                      <div className="muted" style={{ marginTop: 8 }}>{v.description ? String(v.description).slice(0,140) + (v.description.length>140? '…':'' ) : 'No description'}</div>
-                    </div>
-
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      <button className="btn-sm btn" onClick={() => openEditor(v)} title="Edit"><ERPIcons.Edit style={{ width: 14, height: 14 }} /></button>
-                      <button className="btn-sm btn" onClick={() => deleteRow(v)} title="Delete"><ERPIcons.Delete style={{ width: 14, height: 14 }} /></button>
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 12, alignItems: 'center' }}>
-                    <div className="muted">{v.course_name || '-'} • {v.book_name || '-'} • {v.chapter_name || '-'}</div>
-                    <div className="muted">{fmtDate(v.created_at)}</div>
-                  </div>
-                </div>
-              </article>
+        {/* Video Grid */}
+        {loading ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <LoadingCard key={i} variant="detailed" lines={3} />
             ))}
           </div>
-        )}
-
-        <div style={{ marginTop: 18, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div className="muted">{rows.length ? `${(pagination.page-1)*pagination.pageSize+1}–${Math.min(pagination.page*pagination.pageSize, pagination.total)} of ${pagination.total}` : ''}</div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn" disabled={pagination.page<=1} onClick={() => setPagination(p => ({ ...p, page: Math.max(1, p.page - 1) }))}>Prev</button>
-            <button className="btn btn-primary" disabled={(pagination.page*pagination.pageSize) >= pagination.total} onClick={() => setPagination(p => ({ ...p, page: p.page + 1 }))}>Next</button>
+        ) : rows.length === 0 ? (
+          <div className="text-center py-12 text-gray-500 dark:text-gray-400">
+            No videos found
           </div>
-        </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
+              {rows.map((video) => (
+                <motion.div
+                  key={video.video_id}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow"
+                >
+                  {/* Thumbnail */}
+                  <div
+                    className="relative w-full h-40 bg-gray-100 dark:bg-gray-700 cursor-pointer overflow-hidden"
+                    onClick={() => openPlayer(video)}
+                  >
+                    {video._deriving || !video.thumbnail ? (
+                      <div className="w-full h-full bg-gray-200 dark:bg-gray-600 animate-pulse" />
+                    ) : (
+                      <img
+                        src={video.thumbnail}
+                        alt={video.tittle}
+                        className="w-full h-full object-cover"
+                        onError={(e) => (e.currentTarget.src = DEFAULT_IMAGE)}
+                      />
+                    )}
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="w-12 h-12 rounded-full bg-white/90 dark:bg-white/20 flex items-center justify-center">
+                        <svg className="w-6 h-6 text-indigo-600 dark:text-indigo-400" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M8 5v14l11-7z" />
+                        </svg>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Card body */}
+                  <div className="p-4 flex flex-col gap-2">
+                    <h3 className="font-semibold text-gray-900 dark:text-white truncate">
+                      {video.tittle || video.title || video.displayTitle}
+                    </h3>
+                    {video.description && (
+                      <p className="text-sm text-gray-500 dark:text-gray-400 line-clamp-2">
+                        {video.description}
+                      </p>
+                    )}
+                    <div className="flex justify-between items-center text-xs text-gray-500 dark:text-gray-400 mt-auto">
+                      <span>
+                        {[video.course_name, video.book_name, video.chapter_name]
+                          .filter(Boolean)
+                          .join(" • ") || "—"}
+                      </span>
+                      <span>{new Date(video.created_at).toLocaleDateString()}</span>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex gap-2 mt-2">
+                      <IconBtn
+                        icon={ERPIcons.Edit}
+                        size="xs"
+                        onClick={() => openEditor(video)}
+                        title="Edit"
+                      />
+                      <IconBtn
+                        icon={ERPIcons.Delete}
+                        size="xs"
+                        className="hover:bg-rose-50 dark:hover:bg-rose-900/20"
+                        onClick={() => handleDelete(video)}
+                        title="Delete"
+                      />
+                    </div>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+
+            {/* Pagination */}
+            <div className="mt-6 flex justify-between items-center">
+              <div className="text-sm text-gray-500 dark:text-gray-400">
+                Showing {Math.min((pagination.page - 1) * pagination.pageSize + 1, pagination.total)} - {Math.min(pagination.page * pagination.pageSize, pagination.total)} of {pagination.total}
+              </div>
+              <Pagination
+                currentPage={pagination.page}
+                totalPages={Math.ceil(pagination.total / pagination.pageSize)}
+                onPageChange={(page) => setPagination((p) => ({ ...p, page }))}
+                showNumbers
+              />
+            </div>
+          </>
+        )}
       </div>
 
       {/* Editor Modal */}
-      {editorOpen && (
-        <div className="modal-backdrop" onClick={(e) => { e.stopPropagation(); }} onMouseDown={(e) => { e.stopPropagation(); }}>
-          <form
-                onSubmit={handleSave}
-                onClick={(e) => e.stopPropagation()}
-                onMouseDown={(e) => e.stopPropagation()}
-                className="modal-card"
-                >
-
-            <div className="editor-header">
-              <img src={headerLogo} alt="Ank" style={{ height: 46 }} onError={safeImgOnError} />
-              <div className="editor-title">{editing ? 'Edit Video' : 'Create Video'}</div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button type="button" className="btn btn-outline" onClick={() => { setEditorOpen(false); setEditing(null); }}>Close</button>
-                <button type="submit" className="btn btn-primary">Save</button>
+      <AnimatePresence>
+        {editorOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+              onClick={() => setEditorOpen(false)}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ duration: 0.2 }}
+              className="relative w-full h-full sm:h-auto sm:max-h-[90vh] sm:max-w-4xl bg-white dark:bg-gray-800 rounded-none sm:rounded-2xl shadow-2xl overflow-hidden flex flex-col"
+              role="dialog"
+              aria-modal="true"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-center gap-3 px-4 sm:px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-r from-indigo-50 to-blue-50 dark:from-gray-900 dark:to-gray-800">
+                <img src={LOGO} alt="Logo" className="h-10 sm:h-12 w-auto rounded" />
+                <div className="flex-1">
+                  <h2 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-white">
+                    {editing ? "Edit Video" : "Create Video"}
+                  </h2>
+                </div>
+                <IconBtn icon={ERPIcons.Close} onClick={() => setEditorOpen(false)} />
               </div>
-            </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 380px', gap: 18, padding: 18 }}>
-              <div>
-                <FormField label="Title" required>
-                  <TextInput value={form.tittle} onChange={(v) => setForm(f => ({ ...f, tittle: v, title: v }))} />
+              {/* Form */}
+              <form onSubmit={handleSave} className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
+                <FormField label="Title *" required>
+                  <TextInput
+                    value={form.tittle}
+                    onChange={(v) => setForm((f) => ({ ...f, tittle: v, title: v }))}
+                    placeholder="Video title"
+                  />
                 </FormField>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <FormField label="Course">
-                    <Select value={form.course_id} onChange={(v) => setForm(f => ({ ...f, course_id: v, book_id: '', chapter_id: '' }))} options={[{ value: '', label: '— none —' }].concat((courses || []).map(c => ({ value: c.course_id, label: c.course_name })))} disabled={lookupsFailedFlag} />
+                    <Select
+                      value={form.course_id}
+                      onChange={(v) => setForm((f) => ({ ...f, course_id: v, book_id: "", chapter_id: "" }))}
+                      options={[
+                        { value: "", label: "None" },
+                        ...courses.map((c) => ({ value: c.course_id, label: c.course_name })),
+                      ]}
+                      disabled={lookupsFailed}
+                    />
                   </FormField>
                   <FormField label="Book">
-                    <Select value={form.book_id} onChange={(v) => setForm(f => ({ ...f, book_id: v, chapter_id: '' }))} options={[{ value: '', label: '— none —' }].concat(booksForCourse.map(b => ({ value: b.book_id, label: b.book_name })))} disabled={lookupsFailedFlag} />
+                    <Select
+                      value={form.book_id}
+                      onChange={(v) => setForm((f) => ({ ...f, book_id: v, chapter_id: "" }))}
+                      options={[
+                        { value: "", label: "None" },
+                        ...books
+                          .filter((b) => !form.course_id || String(b.course_id) === String(form.course_id))
+                          .map((b) => ({ value: b.book_id, label: b.book_name })),
+                      ]}
+                      disabled={lookupsFailed}
+                    />
                   </FormField>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   <FormField label="Chapter">
-                    <Select value={form.chapter_id} onChange={(v) => setForm(f => ({ ...f, chapter_id: v }))} options={[{ value: '', label: '— none —' }].concat(chaptersForBook.map(ch => ({ value: ch.chapter_id, label: ch.chapter_name })))} disabled={lookupsFailedFlag} />
+                    <Select
+                      value={form.chapter_id}
+                      onChange={(v) => setForm((f) => ({ ...f, chapter_id: v }))}
+                      options={[
+                        { value: "", label: "None" },
+                        ...chapters
+                          .filter((ch) => !form.book_id || String(ch.book_id) === String(form.book_id))
+                          .map((ch) => ({ value: ch.chapter_id, label: ch.chapter_name })),
+                      ]}
+                      disabled={lookupsFailed}
+                    />
                   </FormField>
-
-                  <FormField label="Video link (YouTube/Vimeo/Drive/MP4)">
-                    <TextInput value={form.video_link} onChange={(v) => setForm(f => ({ ...f, video_link: v }))} placeholder="https://..." />
+                  <FormField label="Video Link">
+                    <TextInput
+                      value={form.video_link}
+                      onChange={(v) => setForm((f) => ({ ...f, video_link: v }))}
+                      placeholder="https://..."
+                    />
                   </FormField>
                 </div>
 
                 <FormField label="Description">
-                  <textarea value={form.description} onChange={(e) => setForm(f => ({ ...f, description: e.target.value }))} className="form-control" rows={5} />
+                  <textarea
+                    value={form.description}
+                    onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white min-h-[100px] resize-y"
+                    rows={4}
+                  />
                 </FormField>
 
-                <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
-                  <button type="button" className="btn" onClick={() => {
-                    const tempTitle = form.tittle || form.title || 'Preview';
-                    setPlayerTitle(tempTitle);
-                    setPlayerHtml(makePlayerHtml(form.video_link || '', tempTitle));
-                    setPlayerOpen(true);
-                  }}><ERPIcons.Play style={{ width: 16, height: 16, marginRight: 6 }} />Preview</button>
-
-                  <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <div className="muted">Thumbnail:</div>
-                    <div className="muted" style={{ fontSize: 13 }}>{thumbnailPreview && thumbnailPreview !== placeholder ? 'derived or backend' : 'will be derived from URL'}</div>
-                    <button type="button" className="btn btn-outline" onClick={async () => {
-                      setThumbnailPreview(placeholder);
-                      const d = await deriveThumbnail(form.video_link || '');
-                      setThumbnailPreview(d || placeholder);
-                    }}>Regenerate</button>
+                <div className="flex items-center gap-4">
+                  <OutlineBtn
+                    type="button"
+                    onClick={() => {
+                      const tempTitle = form.tittle || form.title || "Preview";
+                      setPlayerTitle(tempTitle);
+                      setPlayerHtml(makePlayerHtml(form.video_link || "", tempTitle));
+                      setPlayerOpen(true);
+                    }}
+                  >
+                    Preview
+                  </OutlineBtn>
+                  <div className="text-sm text-gray-500 dark:text-gray-400 ml-auto">
+                    Thumbnail: {thumbnailPreview !== DEFAULT_IMAGE ? "Derived" : "Will be derived"}
                   </div>
+                  <OutlineBtn
+                    type="button"
+                    onClick={async () => {
+                      setThumbnailPreview(DEFAULT_IMAGE);
+                      const derived = await deriveThumbnail(form.video_link || "");
+                      setThumbnailPreview(derived || DEFAULT_IMAGE);
+                    }}
+                  >
+                    Regenerate
+                  </OutlineBtn>
                 </div>
-              </div>
 
-              <aside>
-                <div style={{ marginTop: 0 }}>
-                  <div style={{ border: '1px solid rgba(2,6,23,0.04)', borderRadius: 12, padding: 10, background:'linear-gradient(180deg,#fff,#fbfdff)' }}>
-                    <img src={thumbnailPreview} alt="thumb" style={{ width: '100%', height: 220, objectFit: 'cover', borderRadius: 10 }} onError={safeImgOnError} />
-                    <div className="muted" style={{ marginTop: 10 }}>{thumbnailPreview === placeholder ? 'Thumbnail preview' : 'Derived thumbnail'}</div>
-                    {AUTO_SAVE_DERIVED_THUMBS && <div style={{ fontSize: 12, color: '#6b7280', marginTop: 6 }}>Derived thumbnails are auto-saved to backend (best-effort).</div>}
+                {thumbnailPreview !== DEFAULT_IMAGE && (
+                  <div className="mt-4">
+                    <img
+                      src={thumbnailPreview}
+                      alt="Thumbnail"
+                      className="w-full max-h-48 object-cover rounded-lg"
+                      onError={(e) => (e.currentTarget.src = DEFAULT_IMAGE)}
+                    />
                   </div>
+                )}
+
+                <div className="flex justify-end gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
+                  <OutlineBtn onClick={() => setEditorOpen(false)}>Cancel</OutlineBtn>
+                  <PrimaryBtn type="submit">Save Video</PrimaryBtn>
                 </div>
-              </aside>
-            </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
-            <div style={{ padding: 14, borderTop: '1px solid rgba(2,6,23,0.03)', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-              <button type="button" className="btn btn-outline" onClick={() => { setEditorOpen(false); setEditing(null); }}>Cancel</button>
-              <button type="submit" className="btn btn-primary">Save video</button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {/* CSV Import Modal */}
-      {importOpen && (
-        <div className="modal-backdrop" onClick={(e) => { e.stopPropagation(); }} onMouseDown={(e) => { e.stopPropagation(); }}>
-          <div className="modal-card" style={{ padding: 16, maxWidth: 980 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-              <div style={{ fontWeight: 700, fontSize: 18 }}>Import Videos from CSV</div>
-              <div>
-                <button className="btn btn-outline" onClick={() => { setImportOpen(false); setImportText(''); setImportPreviewRows([]); }}>Close</button>
+      {/* Player Modal */}
+      <AnimatePresence>
+        {playerOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="relative w-full max-w-4xl bg-white dark:bg-gray-800 rounded-2xl shadow-2xl overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+                <h3 className="font-semibold text-gray-900 dark:text-white">{playerTitle}</h3>
+                <IconBtn icon={ERPIcons.Close} onClick={() => setPlayerOpen(false)} />
               </div>
-            </div>
+              <div className="p-2" dangerouslySetInnerHTML={{ __html: playerHtml }} />
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: 12 }}>
-              <div>
-                <div style={{ marginBottom: 8 }}>
-                  <input ref={fileInputRef} type="file" accept=".csv,text/csv" onChange={(e) => onImportFileSelected(e.target.files)} />
-                </div>
+      {/* Import CSV Modal */}
+      <AnimatePresence>
+        {importOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+              onClick={() => setImportOpen(false)}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative w-full h-full sm:h-auto sm:max-h-[90vh] sm:max-w-2xl bg-white dark:bg-gray-800 rounded-none sm:rounded-2xl shadow-2xl overflow-hidden flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-4 sm:p-6">
+                <h2 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white">Import Videos from CSV</h2>
+                <div className="space-y-4">
+                  <div>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".csv,text/csv"
+                      onChange={(e) => onImportFileSelected(e.target.files)}
+                      className="text-sm"
+                    />
+                  </div>
+                  <FormField label="Or paste CSV content">
+                    <textarea
+                      value={importText}
+                      onChange={(e) => {
+                        setImportText(e.target.value);
+                        setImportPreviewRows(parseCSVQuick(e.target.value));
+                      }}
+                      rows={8}
+                      className="w-full border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 p-2"
+                    />
+                  </FormField>
 
-                <div style={{ marginBottom: 8 }}>
-                  <div style={{ marginBottom: 6, color: 'var(--muted)' }}>Or paste CSV text below (headers allowed: title,tittle,description,video_link,course_name,book_name,chapter_name)</div>
-                  <textarea value={importText} onChange={(e) => { setImportText(e.target.value); setImportPreviewRows(parseCSVQuick(e.target.value)); }} rows={10} className="form-control" />
-                </div>
-
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button className="btn btn-primary" onClick={submitImport}>Import CSV</button>
-                  <button className="btn btn-outline" onClick={() => { setImportText(''); setImportPreviewRows([]); if (fileInputRef.current) fileInputRef.current.value = ''; }}>Clear</button>
-                </div>
-
-                <div style={{ marginTop: 12, color: 'var(--muted)' }}>
-                  <div style={{ marginBottom: 6 }}>Preview (first up to 5 rows):</div>
-                  <div style={{ background: '#fff', border: '1px solid rgba(2,6,23,0.04)', borderRadius: 8, padding: 10 }}>
-                    {importPreviewRows.length === 0 ? <div style={{ color: '#9aa4b2' }}>No preview available</div> : (
-                      <div style={{ overflowX: 'auto' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                          <thead>
-                            <tr>
-                              {Object.keys(importPreviewRows[0]).map(h => <th key={h} style={{ textAlign: 'left', padding: 6, fontSize: 13, color: '#374151' }}>{h}</th>)}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {importPreviewRows.map((r, i) => (
-                              <tr key={i}>
-                                {Object.keys(r).map(k => <td key={k} style={{ padding: 6, fontSize: 13, color: '#475569' }}>{String(r[k] ?? '')}</td>)}
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                  {importPreviewRows.length > 0 && (
+                    <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 max-h-40 overflow-y-auto">
+                      <h4 className="font-medium text-sm mb-2">Preview (first rows)</h4>
+                      <div className="text-xs space-y-1">
+                        {importPreviewRows.map((row, i) => (
+                          <div key={i} className="truncate text-gray-600 dark:text-gray-300">
+                            {Object.values(row).join(" | ")}
+                          </div>
+                        ))}
                       </div>
-                    )}
+                    </div>
+                  )}
+
+                  <div className="flex justify-end gap-3">
+                    <OutlineBtn onClick={() => setImportOpen(false)}>Cancel</OutlineBtn>
+                    <PrimaryBtn onClick={submitImport}>Import</PrimaryBtn>
                   </div>
                 </div>
               </div>
-
-              <aside>
-                <div style={{ border: '1px solid rgba(2,6,23,0.04)', borderRadius: 10, padding: 12, background: 'linear-gradient(180deg,#fff,#fbfdff)' }}>
-                  <div style={{ fontWeight: 700, marginBottom: 8 }}>CSV Import Notes</div>
-                  <ul style={{ margin: 0, paddingLeft: 18, color: 'var(--muted)' }}>
-                    <li>Header names supported: <code>title</code> or <code>tittle</code> (either), <code>description</code>, <code>video_link</code>, <code>course_name</code>, <code>book_name</code>, <code>chapter_name</code>.</li>
-                    <li>Rows are resolved against course/book/chapter names when provided — ensure names match existing records.</li>
-                    <li>Large CSVs are accepted; server will insert rows in bulk.</li>
-                    <li>If import fails, server will return an error message.</li>
-                  </ul>
-                </div>
-              </aside>
-            </div>
+            </motion.div>
           </div>
-        </div>
-      )}
-
-      {/* Player lightbox */}
-      {playerOpen && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 99999, background: 'rgba(2,6,23,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => { setPlayerOpen(false); setPlayerHtml(''); }}>
-          <div style={{ width: '90%', maxWidth: 1100, background: '#fff', borderRadius: 12, overflow: 'hidden' }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 12, borderBottom: '1px solid rgba(2,6,23,0.04)' }}>
-              <div style={{ fontWeight: 700 }}>{playerTitle}</div>
-              <div><button className="btn" onClick={() => { setPlayerOpen(false); setPlayerHtml(''); }}>Close</button></div>
-            </div>
-            <div style={{ padding: 12 }} dangerouslySetInnerHTML={{ __html: playerHtml }} />
-          </div>
-        </div>
-      )}
-    </main>
+        )}
+      </AnimatePresence>
+    </div>
   );
 }

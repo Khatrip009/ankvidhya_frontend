@@ -74,7 +74,6 @@ export default function FacultyPage() {
   // Respond to state change to reset district
   useEffect(() => {
     if (!stateId) return;
-    // If current district doesn't belong to selected state, clear it
     const valid = districts.filter((d) => String(d.state_id) === String(stateId));
     if (!valid.some((d) => String(d.district_id) === String(districtId))) {
       setDistrictId("");

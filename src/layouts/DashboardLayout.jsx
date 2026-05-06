@@ -3,6 +3,8 @@ import React from "react";
 import { useLocation } from "react-router-dom";
 import Topbar from "../components/Topbar";
 import Sidebar from "../components/Sidebar";
+import InstallBanner from "../components/InstallBanner";
+
 
 export default function DashboardLayout({ children }) {
   const location = useLocation();
@@ -14,6 +16,9 @@ export default function DashboardLayout({ children }) {
 
   return (
     <div className="h-screen flex flex-col bg-slate-50 dark:bg-slate-900 overflow-hidden">
+      {/* install as an application */}
+      <InstallBanner />
+
       {/* Topbar */}
       <Topbar logoClass="h-10 w-10 object-contain" />
 
