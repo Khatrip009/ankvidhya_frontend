@@ -17,7 +17,6 @@ import {
   ToggleSwitch,
 } from "../components/input.jsx";
 import ERPIcons from "../components/icons.jsx";
-import { useToast } from "../hooks/useToast.jsx";
 import { LoadingCard } from "../components/cards.jsx";
 
 const DEFAULT_PAGE_SIZE = 25;
@@ -26,7 +25,26 @@ const DEFAULT_LOGO = "/images/ANK.png";
 const MODAL_HEADER_LOGO = "/images/Ank_Logo.png";
 
 export default function SchoolsPage() {
-  const toast = useToast();
+  // ---------- Toast notification system (built-in, no external hook needed) ----------
+  const [toastMsg, setToastMsg] = useState(null);
+  const toastTimer = useRef(null);
+
+  const showToast = useCallback(({ type, message }) => {
+    // clear any existing timer
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToastMsg({ type, message });
+    toastTimer.current = setTimeout(() => {
+      setToastMsg(null);
+      toastTimer.current = null;
+    }, 4000);
+  }, []);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+    };
+  }, []);
 
   // Data
   const [mediums, setMediums] = useState([]);
@@ -95,7 +113,7 @@ export default function SchoolsPage() {
       setDistricts(dRes?.data || dRes || []);
     } catch (err) {
       console.error("Lookup load failed", err);
-      toast.error("Failed to load dropdown data");
+      showToast({ type: "error", message: "Failed to load dropdown data" });
     }
   }
 
@@ -154,20 +172,15 @@ export default function SchoolsPage() {
       return;
     }
 
-    // Validate size
     if (file.size > UPLOAD_MAX_KB * 1024) {
-      toast.error(`File size must be under ${UPLOAD_MAX_KB}KB`);
+      showToast({ type: "error", message: `File size must be under ${UPLOAD_MAX_KB}KB` });
       setIsSelectingFile(false);
       return;
     }
 
-    // Show local preview
     const reader = new FileReader();
-    reader.onload = () => {
-      setLogoPreview(reader.result);
-    };
+    reader.onload = () => setLogoPreview(reader.result);
     reader.readAsDataURL(file);
-
     await uploadLogo(file);
   }
 
@@ -183,19 +196,18 @@ export default function SchoolsPage() {
     for (const url of urls) {
       try {
         const res = await api.post(url, fd, { headers: {} });
-        const imageUrl =
-          res?.data?.url || res?.data?.data?.url || res?.url || "";
+        const imageUrl = res?.data?.url || res?.data?.data?.url || res?.url || "";
         if (imageUrl) {
           setForm((f) => ({ ...f, image: imageUrl }));
-          toast.success("Logo uploaded");
+          showToast({ type: "success", message: "Logo uploaded" });
           return;
         }
       } catch (err) {
         if (err?.status === 404) continue;
-        else break; // real error
+        else break;
       }
     }
-    toast.error("Failed to upload logo – server endpoint not found");
+    showToast({ type: "error", message: "Failed to upload logo – server endpoint not found" });
   }
 
   // -------- Save --------
@@ -214,7 +226,6 @@ export default function SchoolsPage() {
     setFormError("");
     setErrors({});
 
-    // Validation
     const newErrors = {};
     if (!form.school_name?.trim()) newErrors.school_name = "School name is required";
     if (!form.email || !/^\S+@\S+\.\S+$/.test(form.email)) newErrors.email = "Valid email is required";
@@ -249,10 +260,10 @@ export default function SchoolsPage() {
     try {
       if (editing?.school_id) {
         await api.put(`/api/schools/schools/${editing.school_id}`, payload);
-        toast.success("School updated");
+        showToast({ type: "success", message: "School updated" });
       } else {
         await api.post("/api/schools/schools", payload);
-        toast.success("School created");
+        showToast({ type: "success", message: "School created" });
       }
       setTableKey((k) => k + 1);
       closeModal();
@@ -260,7 +271,8 @@ export default function SchoolsPage() {
       console.error("Save error", err);
       const msg = err?.response?.data?.message || err?.message || "Failed to save school";
       setFormError(msg);
-      if (err?.status === 409) toast.error("Username or email already exists");
+      if (err?.status === 409) showToast({ type: "error", message: "Username or email already exists" });
+      else showToast({ type: "error", message: msg });
     } finally {
       setSaving(false);
     }
@@ -285,11 +297,11 @@ export default function SchoolsPage() {
     if (!window.confirm(`Delete "${row.school_name}"? This cannot be undone.`)) return;
     try {
       await api.delete(`/api/schools/schools/${row.school_id}`);
-      toast.success("School deleted");
+      showToast({ type: "success", message: "School deleted" });
       setTableKey((k) => k + 1);
     } catch (err) {
       console.error("Delete error", err);
-      toast.error(err?.response?.data?.message || "Failed to delete");
+      showToast({ type: "error", message: err?.response?.data?.message || "Failed to delete" });
     }
   }
 
@@ -298,14 +310,14 @@ export default function SchoolsPage() {
     try {
       await api.download("/api/schools/schools/export/csv", { filename: "schools.csv" });
     } catch (err) {
-      toast.error("Export failed");
+      showToast({ type: "error", message: "Export failed" });
     }
   }
   async function exportXlsx() {
     try {
       await api.download("/api/schools/schools/export/xlsx", { filename: "schools.xlsx" });
     } catch (err) {
-      toast.error("Export failed");
+      showToast({ type: "error", message: "Export failed" });
     }
   }
   async function importCsv(e) {
@@ -315,10 +327,10 @@ export default function SchoolsPage() {
     fd.append("file", file);
     try {
       await api.post("/api/schools/schools/import", fd, { headers: {} });
-      toast.success("Import successful");
+      showToast({ type: "success", message: "Import successful" });
       setTableKey((k) => k + 1);
     } catch (err) {
-      toast.error(err?.response?.data?.message || "Import failed");
+      showToast({ type: "error", message: err?.response?.data?.message || "Import failed" });
     } finally {
       e.target.value = "";
     }
@@ -413,6 +425,31 @@ export default function SchoolsPage() {
   // -------- Render --------
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 p-3 sm:p-5 lg:p-6 transition-colors">
+      {/* Toast message */}
+      <AnimatePresence>
+        {toastMsg && (
+          <motion.div
+            initial={{ opacity: 0, y: -20, x: 20 }}
+            animate={{ opacity: 1, y: 0, x: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className={`fixed top-4 right-4 z-50 px-5 py-3 rounded-lg shadow-lg text-sm font-medium flex items-center gap-2 ${
+              toastMsg.type === "success"
+                ? "bg-emerald-50 border border-emerald-200 text-emerald-800 dark:bg-emerald-900/30 dark:border-emerald-800 dark:text-emerald-200"
+                : "bg-rose-50 border border-rose-200 text-rose-800 dark:bg-rose-900/30 dark:border-rose-800 dark:text-rose-200"
+            }`}
+            role="alert"
+          >
+            <span>{toastMsg.message}</span>
+            <button
+              onClick={() => setToastMsg(null)}
+              className="ml-2 p-1 rounded hover:bg-black/5 dark:hover:bg-white/10"
+            >
+              <ERPIcons.Close className="w-4 h-4" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <motion.div
