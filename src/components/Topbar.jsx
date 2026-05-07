@@ -21,7 +21,7 @@ function useNotifications() {
   const fetchNotifications = useCallback(async () => {
     try {
       setError(null);
-      const res = await api.get("/api/notifications");
+      const res = await api.get("/api/dashboard/notifications");
       // Adapt to your API response shape – common pattern:
       const data = res?.data?.data ?? res?.data ?? [];
       setNotifications(Array.isArray(data) ? data : []);
