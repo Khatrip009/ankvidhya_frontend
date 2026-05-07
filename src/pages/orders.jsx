@@ -433,39 +433,91 @@ export default function OrdersPage() {
   };
 
   // -------------------------------------------------------------------------
-  // Invoice helpers
+  // Invoice Helpers (CORRECTED ENDPOINTS)
   // -------------------------------------------------------------------------
+
+  /**
+   * Ensures an invoice exists for the given order.
+   * Uses POST /api/orders/:orderId/invoice/generate (your backend orders.js route).
+   */
   const ensureInvoiceForOrder = async (orderId) => {
     const existing = orderInvoiceMap[orderId];
     if (existing) return existing;
+
     try {
-      const res = await api.post(`/api/orders/${orderId}/invoice`);
-      if (res?.invoice_id) {
-        setOrderInvoiceMap(prev => ({ ...prev, [orderId]: res }));
-        return res;
-      }
-    } catch {}
-    try {
-      const res = await api.get(`/api/orders/${orderId}/invoice`);
-      const inv = res?.data;
+      // 1) Try the generate endpoint first (creates the invoice and returns it)
+      const genRes = await api.post(`/api/orders/${orderId}/invoice/generate`);
+      const inv = genRes?.invoice || genRes?.data?.invoice || genRes;
       if (inv?.invoice_id) {
         setOrderInvoiceMap(prev => ({ ...prev, [orderId]: inv }));
         return inv;
       }
-    } catch {}
+    } catch (err) {
+      console.warn("generate invoice endpoint failed", err);
+    }
+
+    // 2) Fallback: fetch existing invoice via GET
+    try {
+      const getRes = await api.get(`/api/orders/${orderId}/invoice`);
+      const inv = getRes?.data || getRes;
+      if (inv?.invoice_id) {
+        setOrderInvoiceMap(prev => ({ ...prev, [orderId]: inv }));
+        return inv;
+      }
+    } catch (err) {
+      console.warn("GET invoice endpoint failed", err);
+    }
+
     return null;
   };
 
   const handleInvoiceCreate = async (orderId) => {
-    const inv = await ensureInvoiceForOrder(orderId);
-    if (inv) toast.success("Invoice already exists / created");
-    else toast.error("Could not create invoice. Check server logs.");
+    try {
+      const inv = await ensureInvoiceForOrder(orderId);
+      if (inv) {
+        toast.success(`Invoice #${inv.invoice_number || inv.invoice_id} ready`);
+        // Refresh the view to update invoice info
+        openView(orderId);
+      } else {
+        toast.error("Could not create invoice. Check server logs.");
+      }
+    } catch (err) {
+      const msg = err?.data?.detail || err?.message || "Invoice creation failed";
+      toast.error(msg);
+    }
   };
 
+  /**
+   * Downloads the invoice PDF.
+   * Strategy:
+   *  1) POST /api/invoices/:invoiceId/generate  → returns { url }
+   *  2) If URL is returned → open in new tab
+   *  3) Fallback: GET /api/invoices/:invoiceId/pdf  → blob download
+   */
   const handleInvoiceDownload = async (orderId) => {
     const inv = orderInvoiceMap[orderId];
     const invoiceId = inv?.invoice_id;
-    if (!invoiceId) { toast.warning("Invoice not available"); return; }
+    if (!invoiceId) {
+      toast.warning("Invoice not available. Create it first.");
+      return;
+    }
+
+    try {
+      // Step 1: Generate PDF and get public URL
+      const genRes = await api.post(`/api/invoices/${invoiceId}/generate`);
+      const pdfUrl = genRes?.url || genRes?.data?.url;
+
+      if (pdfUrl) {
+        // Open the PDF in a new tab (simplest and most reliable)
+        window.open(pdfUrl, "_blank");
+        toast.success("PDF opened in new tab");
+        return;
+      }
+    } catch (err) {
+      console.warn("POST generate PDF failed, falling back to GET stream", err);
+    }
+
+    // Step 2: Fallback – GET /api/invoices/:invoiceId/pdf as blob
     try {
       const blob = await api.get(`/api/invoices/${invoiceId}/pdf`, { expect: "blob" });
       const url = URL.createObjectURL(blob);
@@ -476,8 +528,11 @@ export default function OrdersPage() {
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
+      toast.success("PDF downloaded");
     } catch (err) {
-      toast.error("Failed to download invoice");
+      const msg = err?.data?.detail || err?.message || "Failed to download PDF. The PDF service may not be running.";
+      toast.error(msg);
+      console.error("Invoice PDF download error", err);
     }
   };
 
@@ -627,7 +682,7 @@ export default function OrdersPage() {
 }
 
 // ================================================================
-// Sub‑components
+// Sub‑components (unchanged, included for completeness)
 // ================================================================
 
 function CreateOrderModal({ open, onClose, form, formError, formSubmitting, mediums, standards, convertedLeads, onSelectLead, onFieldChange, addStrengthRow, removeStrengthRow, updateStrength, onSubmit, onCancel }) {
@@ -761,7 +816,6 @@ function ViewOrderModal({ open, onClose, data, invoiceInfo, onGenerate, onRepric
             <IconBtn icon={ERPIcons.Close} onClick={onClose} />
           </div>
           <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-4">
-            {/* details */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
               <div><span className="font-medium">School:</span> {data.school_name || data.billing_name}</div>
               <div><span className="font-medium">Contact:</span> {data.contact_name} — {data.phone}</div>
