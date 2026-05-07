@@ -25,14 +25,19 @@ function fmtDateShort(s) {
 export default function StrengthsPage() {
   const toast = useToast();
 
+  // Lookup data for dropdowns
+  const [mediums, setMediums] = useState([]);
+  const [standards, setStandards] = useState([]);
+
   // Orders list
   const [ordersList, setOrdersList] = useState([]);
-  const [orderIdInput, setOrderIdInput] = useState(""); // for direct input
+  const [orderIdInput, setOrderIdInput] = useState("");
   const [loadingOrderList, setLoadingOrderList] = useState(false);
 
   // Current order
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);          // <-- FIX: added error state
 
   // Strengths
   const [strengthRows, setStrengthRows] = useState([]);
@@ -49,10 +54,25 @@ export default function StrengthsPage() {
 
   const orderSelectRef = useRef(null);
 
-  // Fetch orders list on mount
+  // Fetch lookups and orders list on mount
   useEffect(() => {
+    fetchLookups();
     fetchOrdersList();
   }, []);
+
+  const fetchLookups = async () => {
+    try {
+      const [medRes, stdRes] = await Promise.all([
+        api.get("/api/master/mediums"),
+        api.get("/api/master/standards"),
+      ]);
+      setMediums(medRes?.data || []);
+      setStandards(stdRes?.data || []);
+    } catch (err) {
+      console.error("Failed to load lookups", err);
+      toast.error("Failed to load dropdown data");
+    }
+  };
 
   const fetchOrdersList = async () => {
     setLoadingOrderList(true);
@@ -82,11 +102,11 @@ export default function StrengthsPage() {
 
       setOrder(data);
 
-      // Strengths
+      // Strengths – keep existing IDs, mapped to dropdown-friendly values
       setStrengthRows(
         (data.strengths || []).map(s => ({
-          medium_id: s.medium_id || "",
-          std_id: s.std_id || "",
+          medium_id: s.medium_id ?? "",
+          std_id: s.std_id ?? "",
           students: s.students || 0,
         }))
       );
@@ -122,6 +142,7 @@ export default function StrengthsPage() {
       console.error("loadOrder error", err);
       toast.error("Failed to load order details");
       setOrder(null);
+      setError(err.message || "Failed to load order");
     } finally {
       setLoading(false);
     }
@@ -294,7 +315,7 @@ export default function StrengthsPage() {
 
   const totals = computeTotals();
 
-  // Helper to render status badge
+  // Status badge helper
   const StatusBadge = ({ status }) => {
     const s = (status || "").toLowerCase();
     const map = {
@@ -369,6 +390,9 @@ export default function StrengthsPage() {
               </div>
             </div>
           </div>
+          {error && (
+            <div className="mt-2 text-sm text-rose-500">{error}</div>
+          )}
         </div>
 
         {/* Loading */}
@@ -411,7 +435,7 @@ export default function StrengthsPage() {
               </div>
             </div>
 
-            {/* Strengths Section */}
+            {/* Strengths Section (with dropdowns) */}
             <section className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4 sm:p-6 shadow-sm">
               <div className="flex items-center justify-between mb-4">
                 <div>
@@ -433,20 +457,24 @@ export default function StrengthsPage() {
                   <div key={i} className="grid grid-cols-12 gap-2 items-end">
                     <div className="col-span-4">
                       <label className="text-xs text-gray-500 dark:text-gray-400">Medium</label>
-                      <input
+                      <Select
                         value={r.medium_id}
-                        onChange={(e) => updateStrengthRow(i, "medium_id", e.target.value)}
-                        placeholder="medium id"
-                        className="w-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded px-2 py-2 text-sm"
+                        onChange={(v) => updateStrengthRow(i, "medium_id", v)}
+                        options={[
+                          { value: "", label: "Select Medium" },
+                          ...mediums.map(m => ({ value: m.medium_id, label: m.medium_name })),
+                        ]}
                       />
                     </div>
                     <div className="col-span-4">
                       <label className="text-xs text-gray-500 dark:text-gray-400">Standard</label>
-                      <input
+                      <Select
                         value={r.std_id}
-                        onChange={(e) => updateStrengthRow(i, "std_id", e.target.value)}
-                        placeholder="std id"
-                        className="w-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded px-2 py-2 text-sm"
+                        onChange={(v) => updateStrengthRow(i, "std_id", v)}
+                        options={[
+                          { value: "", label: "Select Standard" },
+                          ...standards.map(s => ({ value: s.std_id, label: s.std_name })),
+                        ]}
                       />
                     </div>
                     <div className="col-span-3">
