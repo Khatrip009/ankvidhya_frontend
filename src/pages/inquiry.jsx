@@ -56,7 +56,7 @@ export default function InquiryPage() {
   const [toDate, setToDate] = useState("");
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
-  // Table data (handled by ServerDataTable's onFetch)
+  // Table refresh key
   const [tableKey, setTableKey] = useState(0);
 
   // Lookups
@@ -87,13 +87,12 @@ export default function InquiryPage() {
   useEffect(() => {
     (async () => {
       try {
-        const [medRes, stdRes, empRes] = await Promise.all([
-          api.get("/api/master/lookups", { query: { type: "mediums,standards" } }),
-          api.get("/api/master/lookups", { query: { type: "standards" } }),
+        const [lookupRes, empRes] = await Promise.all([
+          api.get("/api/master/lookups"),          // returns { mediums, standards }
           api.get("/api/employees", { query: { pageSize: 500 } }),
         ]);
-        setMediums(medRes?.data?.mediums || medRes?.mediums || []);
-        setStandards(stdRes?.data?.standards || stdRes?.standards || []);
+        setMediums(lookupRes?.mediums || []);
+        setStandards(lookupRes?.standards || []);
         setEmployees(empRes?.data || []);
       } catch (err) {
         console.error("Lookup load failed", err);
@@ -212,34 +211,37 @@ export default function InquiryPage() {
       city: form.city || null,
       state: form.state || null,
       pincode: form.pincode || null,
-      students_count: form.students_count || null,
-      medium_id: form.medium_id || undefined,
-      medium_name: form.medium_name || undefined,
-      std_from_id: form.std_from_id || undefined,
-      std_from_name: form.std_from_name || undefined,
-      std_to_id: form.std_to_id || undefined,
-      std_to_name: form.std_to_name || undefined,
+      students_count: form.students_count ? Number(form.students_count) : null,
+      medium_id: form.medium_id || null,
+      medium_name: form.medium_name || null,
+      std_from_id: form.std_from_id || null,
+      std_from_name: form.std_from_name || null,
+      std_to_id: form.std_to_id || null,
+      std_to_name: form.std_to_name || null,
       message: form.message || null,
       source: form.source || "website",
       consent: !!form.consent,
-      assigned_to_employee_id: form.assigned_to_employee_id || undefined,
+      assigned_to_employee_id: form.assigned_to_employee_id || null,
       status: form.status || "new",
     };
 
     try {
       if (isEditing && editingId) {
-        await api.put(`/api/leads/${editingId}`, payload);
+        // Backend uses PATCH, not PUT
+        await api.patch(`/api/leads/${editingId}`, payload);
         toast.success("Inquiry updated");
       } else {
-        await api.post("/api/leads", payload);
+        // Create uses public endpoint (required by your backend)
+        await api.post("/api/leads/public", payload);
         toast.success("Inquiry created");
       }
       closeModal();
       setTableKey(k => k + 1);
     } catch (err) {
       console.error("Save error", err);
-      setFormError(err?.response?.data?.message || err?.message || "Save failed");
-      toast.error(err?.response?.data?.message || "Failed to save inquiry");
+      const msg = err?.data?.message || err?.message || "Save failed";
+      setFormError(msg);
+      toast.error(msg);
     } finally {
       setFormSubmitting(false);
     }
@@ -261,7 +263,6 @@ export default function InquiryPage() {
   // ---------- Export CSV ----------
   const handleExportCsv = async () => {
     try {
-      // Fetch all data for export (simplified: get a larger page)
       const res = await api.get("/api/leads", {
         query: { page: 1, pageSize: 10000, search, status, from: fromDate, to: toDate }
       });
@@ -276,6 +277,7 @@ export default function InquiryPage() {
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
+      toast.success("Exported successfully");
     } catch (err) {
       console.error("Export error", err);
       toast.error("Export failed");
@@ -299,7 +301,7 @@ export default function InquiryPage() {
 
     for (const r of rows) {
       try {
-        await api.post("/api/leads", {
+        await api.post("/api/leads/public", {
           school_name: r.school_name || r.school || "",
           contact_name: r.contact_name || r.contact || "",
           phone: r.phone || r.mobile || "",
@@ -333,7 +335,6 @@ export default function InquiryPage() {
       toast.success("Import completed successfully.");
     }
 
-    // Clear file input
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
